@@ -1,0 +1,28 @@
+{
+  "name": "nexus-mining-platform",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Nexus Virtual Cloud Mining Engine — Next.js/Express/PostgreSQL multi-coin yield dashboard",
+  "scripts": {
+    "install:all": "npm install && cd frontend && npm install",
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:backend": "cd backend && nodemon server.js",
+    "dev:frontend": "cd frontend && npm run dev",
+    "build": "cd frontend && npm run build",
+    "start": "cd backend && node server.js",
+    "test": "cd backend && jest",
+    "lint": "eslint backend/"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "ethers": "^6.13.0",
+    "express": "^4.19.2",
+    "pg": "^8.12.0"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "jest": "^29.7.0",
+    "nodemon": "^3.1.0"
+  }
+}
