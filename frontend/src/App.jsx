@@ -4,7 +4,7 @@ import SummaryRow from './components/SummaryRow';
 import LiveMinerPanel from './components/LiveMinerPanel';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
-const DEFAULT_WALLET = '0x1111111111111111111111111111111111111111';
+const DEFAULT_WALLET = '0x0000000000000000000000000000000000000001';
 const STORAGE_KEY = 'nexus.wallet';
 
 const POOLS = [
@@ -136,9 +136,8 @@ export default function App() {
           <>
             {isEmptyAccount && (
               <div className="empty-wallet-banner">
-                This wallet has no mining account yet. The demo account is{' '}
-                <code>0x1111111111111111111111111111111111111111</code> — paste it in the
-                wallet box above, then click <strong>Connect Wallet</strong>.
+                This wallet has no mining account yet. Enter your wallet address in the box
+                above, then click <strong>Connect Wallet</strong> to create one.
               </div>
             )}
 
