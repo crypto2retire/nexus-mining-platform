@@ -36,6 +36,29 @@ export default function LiveMinerPanel() {
   }, []);
 
   const online = Boolean(status?.online);
+  const [busy, setBusy] = useState(false);
+  const [actionMsg, setActionMsg] = useState('');
+
+  const runAction = async (action) => {
+    setBusy(true);
+    setActionMsg('');
+    try {
+      const res = await fetch(`${API_BASE}/api/miner/${action}`, { method: 'POST' });
+      const data = await res.json();
+      setActionMsg(data.ok ? (data.alreadyRunning ? 'Already running' : `Miner ${action === 'start' ? 'started' : 'stopped'}`) : `Error: ${data.error || res.status}`);
+      // Refresh status shortly after the action.
+      setTimeout(async () => {
+        try {
+          const r = await fetch(`${API_BASE}/api/miner/status`);
+          setStatus(await r.json());
+        } catch { /* keep last status */ }
+      }, 3000);
+    } catch (err) {
+      setActionMsg(`Error: ${err.message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
     <section className="mining-card miner-panel">
@@ -47,6 +70,24 @@ export default function LiveMinerPanel() {
       </div>
 
       {error && <div className="error-banner">Miner monitor: {error}</div>}
+
+      <div className="miner-controls">
+        <button
+          className="btn btn-primary"
+          disabled={busy || online}
+          onClick={() => runAction('start')}
+        >
+          ▶ Start Miner
+        </button>
+        <button
+          className="btn btn-danger"
+          disabled={busy || !online}
+          onClick={() => runAction('stop')}
+        >
+          ■ Stop Miner
+        </button>
+        {actionMsg && <span className="miner-action-msg">{actionMsg}</span>}
+      </div>
 
       {online ? (
         <div className="card-stats">

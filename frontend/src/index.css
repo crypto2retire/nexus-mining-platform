@@ -241,6 +241,48 @@ button:disabled {
   100% { transform: scale(1); }
 }
 
+.miner-controls {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+
+.miner-controls .btn {
+  padding: 0.45rem 0.9rem;
+  border: none;
+  border-radius: 0.5rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.miner-controls .btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.miner-controls .btn-primary {
+  background: var(--accent, #22d3ee);
+  color: #0b1220;
+}
+
+.miner-controls .btn-danger {
+  background: rgba(248, 113, 113, 0.9);
+  color: #0b1220;
+}
+
+.miner-action-msg {
+  font-size: 0.8rem;
+  color: var(--muted, #94a3b8);
+}
+
+.miner-offline {
+  color: var(--muted, #94a3b8);
+  font-size: 0.9rem;
+}
+
 .error-banner {
   background: rgba(248, 113, 113, 0.15);
   color: var(--danger);
