@@ -12,8 +12,10 @@ const DEFAULT_XMRIG_URL = 'http://127.0.0.1:8080/1/summary';
 
 async function getMinerStatus() {
   const url = process.env.XMRIG_API_URL || DEFAULT_XMRIG_URL;
+  const token = process.env.XMRIG_API_TOKEN;
   try {
-    const response = await axios.get(url, { timeout: 5000 });
+    const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
+    const response = await axios.get(url, { headers, timeout: 5000 });
     const d = response.data || {};
     return {
       online: true,
