@@ -15,6 +15,7 @@ const REAL_ENV = { ...process.env };
 function setEnv(overrides = {}) {
   const values = {
     NODE_ENV: overrides.NODE_ENV ?? 'development',
+    NICEHASH_ENV: overrides.ENV ?? 'main',
     NICEHASH_API_KEY: overrides.API_KEY ?? 'test-api-key',
     NICEHASH_API_SECRET: overrides.API_SECRET ?? 'test-api-secret',
     NICEHASH_ORG_ID: overrides.ORG_ID ?? 'test-org',
@@ -161,6 +162,47 @@ describe('placeHashpowerOrder safety rails', () => {
     expect(body.amount).toBe(0.001);
     // price must never dip below marketplace minimum
     expect(body.price).toBeGreaterThanOrEqual(0.00005);
+  });
+
+  test('TESTNET: development + NICEHASH_ENV=test + keys + opt-in places a REAL order on api-test.nicehash.com', async () => {
+    setEnv({
+      NODE_ENV: 'development',
+      ENV: 'test',
+      LIVE_ORDERS: '1',
+      POOL_ID: 'pool-test-1',
+    });
+
+    axios
+      .mockResolvedValueOnce({
+        data: {
+          miningAlgorithms: [
+            {
+              algorithm: 'ZHASH',
+              marketFactor: '1000000.00000000',
+              displayMarketFactor: 'MSol',
+              minimalOrderAmount: '0.00100000',
+              minSpeedLimit: '0.00100000',
+              maxSpeedLimit: '10000.00000000',
+            },
+          ],
+        },
+      })
+      .mockResolvedValueOnce({
+        data: { miningAlgorithms: [{ name: 'ZHash', min_amount: 0.001, min_price: 0.0001, min_limit: 0.001 }] },
+      })
+      .mockResolvedValueOnce({ data: { id: 'testnet-order-1' } });
+
+    const result = await placeHashpowerOrder('ZCASH', 0.001);
+
+    expect(result.success).toBe(true);
+    expect(result.mode).toBe('live');
+    expect(result.orderId).toBe('testnet-order-1');
+
+    const postCall = axios.mock.calls[2][0];
+    expect(postCall.url).toBe('https://api-test.nicehash.com/main/api/v2/hashpower/order/');
+    const body = JSON.parse(postCall.data);
+    expect(body.amount).toBe(0.001);
+    expect(body.poolId).toBe('pool-test-1');
   });
 
   test('production live order below marketplace minimum amount is rejected (no overspend)', async () => {

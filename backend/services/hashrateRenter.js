@@ -13,6 +13,16 @@ const crypto = require('crypto');
  * layer refuses to move user funds unless the order was REALLY placed.
  */
 
+/**
+ * Host selection: NICEHASH_ENV=test routes ALL requests to the free NiceHash
+ * TESTNET (api-test.nicehash.com) — test BTC, no real funds. Default = mainnet.
+ */
+function getNiceHashHost() {
+  return (process.env.NICEHASH_ENV || 'main') === 'test'
+    ? 'https://api-test.nicehash.com'
+    : 'https://api2.nicehash.com';
+}
+
 const NICEHASH_HOST = 'https://api2.nicehash.com';
 const NICEHASH_TEST_HOST = 'https://api-test.nicehash.com';
 
@@ -22,14 +32,20 @@ const POOL_ALGORITHM_MAP = {
   LTC_DOGE: 'SCRYPT',
 };
 
+/**
+ * Real order placement requires ALL of:
+ *   - keys set (API_KEY / API_SECRET / ORG_ID)
+ *   - NICEHASH_LIVE_ORDERS === '1' (explicit opt-in)
+ *   - AND EITHER NICEHASH_ENV=test (free testnet) OR NODE_ENV=production (mainnet)
+ */
 function isLiveMode() {
-  return (
-    process.env.NODE_ENV === 'production' &&
+  const hasKeys =
     Boolean(process.env.NICEHASH_API_KEY) &&
     Boolean(process.env.NICEHASH_API_SECRET) &&
-    Boolean(process.env.NICEHASH_ORG_ID) &&
-    process.env.NICEHASH_LIVE_ORDERS === '1'
-  );
+    Boolean(process.env.NICEHASH_ORG_ID);
+  if (!hasKeys || process.env.NICEHASH_LIVE_ORDERS !== '1') return false;
+  if ((process.env.NICEHASH_ENV || 'main') === 'test') return true;
+  return process.env.NODE_ENV === 'production';
 }
 
 function to8(value) {
@@ -103,7 +119,7 @@ async function makeNiceHashRequest(method, path, query = null, bodyObj = null) {
     'Content-Type': 'application/json',
   };
 
-  const url = `${NICEHASH_HOST}${path}${queryString ? `?${queryString}` : ''}`;
+  const url = `${getNiceHashHost()}${path}${queryString ? `?${queryString}` : ''}`;
 
   // CRITICAL: only attach `data` when there is a body. NiceHash returns 400 on
   // GET requests that carry `data: null` + Content-Type: application/json
@@ -159,8 +175,9 @@ async function placeHashpowerOrder(targetPool, spendBtcAmount) {
     return { success: false, mode: 'sandbox', error: `Unknown target pool: ${targetPool}` };
   }
 
-  // Production without explicit live opt-in must NEVER silently simulate.
-  if (process.env.NODE_ENV === 'production' && !isLiveMode()) {
+  // Production (mainnet) without explicit live opt-in must NEVER silently simulate.
+  // (Testnet is exempt — NICEHASH_ENV=test is always a safe, free environment.)
+  if (process.env.NODE_ENV === 'production' && (process.env.NICEHASH_ENV || 'main') !== 'test' && !isLiveMode()) {
     return {
       success: false,
       mode: 'sandbox',
@@ -276,6 +293,7 @@ module.exports = {
   getOrderStatus,
   getBuyInfo,
   getAlgorithms,
+  getNiceHashHost,
   buildSignature,
   makeNiceHashRequest,
   isLiveMode,
