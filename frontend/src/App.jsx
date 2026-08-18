@@ -9,6 +9,7 @@ const POOLS = [
   { key: 'ZCASH', title: 'Zcash (ZEC) Mine' },
   { key: 'KASPA', title: 'Kaspa (KAS) Mine' },
   { key: 'LTC_DOGE', title: 'Litecoin / Dogecoin Merge' },
+  { key: 'XMR', title: 'Monero (XMR) Mine' },
 ];
 
 function useAnimatedPending(pendingByPool) {

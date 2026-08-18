@@ -30,6 +30,9 @@ const POOL_ALGORITHM_MAP = {
   ZCASH: 'ZHASH',
   KASPA: 'KHEAVYHASH',
   LTC_DOGE: 'SCRYPT',
+  // XMR is a SELF-MINED pool (real hardware owned by the operator) — no
+  // NiceHash order is placed for it. RANDOMX listed for reference only.
+  XMR: 'RANDOMX',
 };
 
 /**

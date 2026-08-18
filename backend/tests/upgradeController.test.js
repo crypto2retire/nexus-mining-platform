@@ -215,6 +215,31 @@ describe('upgradeRig — currency conversion + order loop', () => {
     expect(placeHashpowerOrder).not.toHaveBeenCalled();
   });
 
+  test('XMR self-mined upgrade: no USDC charge, no marketplace order, SELF_MINING status', async () => {
+    const { client, queries } = makeClient();
+    pool.connect.mockResolvedValue(client);
+
+    const res = makeRes();
+    await upgradeRig(req({ target_pool: 'XMR', request_id: 'req-xmr-1' }), res);
+
+    expect(res.body.success).toBe(true);
+    expect(res.body.order_status).toBe('SELF_MINING');
+    expect(res.body.btc_spent).toBe(0);
+    expect(res.body.protocol_fee_usdc).toBe(0);
+    expect(res.body.sandbox).toBe(false);
+
+    // No marketplace interaction, no price fetch, no money movement.
+    expect(placeHashpowerOrder).not.toHaveBeenCalled();
+    expect(getLiveBtcPrice).not.toHaveBeenCalled();
+    expect(queries.some((q) => q.sql.includes('UPDATE user_wallets'))).toBe(false);
+    expect(queries.some((q) => q.sql.includes('INSERT INTO protocol_revenue_ledger'))).toBe(false);
+
+    // Idempotent order row recorded as SELF_MINING.
+    const orderInsert = queries.find((q) => q.sql.includes('INSERT INTO hashrate_orders'));
+    expect(orderInsert.params[2]).toBe('req-xmr-1');
+    expect(orderInsert.sql).toContain("'SELF_MINING'");
+  });
+
   test('rejects bad input', async () => {
     const res = makeRes();
     await upgradeRig(req({ wallet: 'not-a-wallet' }), res);

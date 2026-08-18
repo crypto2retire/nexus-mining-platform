@@ -259,6 +259,7 @@ describe('placeHashpowerOrder safety rails', () => {
       ZCASH: 'ZHASH',
       KASPA: 'KHEAVYHASH',
       LTC_DOGE: 'SCRYPT',
+      XMR: 'RANDOMX', // self-mined pool — reference only, no order placed
     });
   });
 });
