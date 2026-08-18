@@ -7,8 +7,10 @@ set -euo pipefail
 APP_DIR=/opt/nexus-mining-platform
 BRANCH="${BRANCH:-main}"
 DOMAIN="${DOMAIN:-}"          # set to e.g. nexus.donelocal.io when DNS is pointed; empty = IP-only
-DB_PASSWORD="${DB_PASSWORD:?set DB_PASSWORD env}"
-API_SECRET="${API_SECRET:?set API_SECRET env}"
+# Secrets are generated server-side when not provided. They land in
+# /opt/nexus-mining-platform/backend/.env (chmod 600) — never in the repo.
+DB_PASSWORD="${DB_PASSWORD:-$(openssl rand -hex 16)}"
+API_SECRET="${API_SECRET:-$(openssl rand -hex 24)}"
 export DEBIAN_FRONTEND=noninteractive
 
 echo "==> [1/9] system update"
@@ -25,8 +27,10 @@ echo "==> [3/9] PostgreSQL + nginx"
 apt-get install -y -qq postgresql nginx
 
 echo "==> [4/9] database + user"
-sudo -u postgres psql -tc "SELECT 1 FROM pg_roles WHERE rolname='nexus'" | grep -q 1 || \
-  sudo -u postgres psql -c "CREATE USER nexus WITH PASSWORD '${DB_PASSWORD}';"
+# Idempotent: create the role if missing, otherwise sync its password.
+sudo -u postgres psql -tc "SELECT 1 FROM pg_roles WHERE rolname='nexus'" | grep -q 1 \
+  && sudo -u postgres psql -c "ALTER ROLE nexus WITH PASSWORD '${DB_PASSWORD}';" \
+  || sudo -u postgres psql -c "CREATE USER nexus WITH PASSWORD '${DB_PASSWORD}';"
 sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname='nexus_mining'" | grep -q 1 || \
   sudo -u postgres createdb -O nexus nexus_mining
 
@@ -115,5 +119,6 @@ systemctl status nexus --no-pager | head -8
 curl -s "http://127.0.0.1/api/dashboard?wallet=0x1111111111111111111111111111111111111111" | head -c 200
 echo
 echo "BOOTSTRAP COMPLETE — app on http://<droplet-ip>/"
+echo "Generated credentials (DB password, API secret) are in $APP_DIR/backend/.env (owner-only)."
 echo "HTTPS: point your domain A record at this IP, then:"
 echo "  apt-get install -y certbot python3-certbot-nginx && certbot --nginx -d your.domain"
