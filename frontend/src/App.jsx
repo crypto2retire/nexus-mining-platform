@@ -4,7 +4,8 @@ import SummaryRow from './components/SummaryRow';
 import LiveMinerPanel from './components/LiveMinerPanel';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
-const DEFAULT_WALLET = '0x0000000000000000000000000000000000000001';
+const DEFAULT_WALLET = '0x1111111111111111111111111111111111111111';
+const STORAGE_KEY = 'nexus.wallet';
 
 const POOLS = [
   { key: 'ZCASH', title: 'Zcash (ZEC) Mine' },
@@ -40,7 +41,7 @@ function useAnimatedPending(pendingByPool) {
 }
 
 export default function App() {
-  const [wallet, setWallet] = useState(DEFAULT_WALLET);
+  const [wallet, setWallet] = useState(() => localStorage.getItem(STORAGE_KEY) || DEFAULT_WALLET);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -109,7 +110,11 @@ export default function App() {
           <input
             className="wallet-input"
             value={wallet}
-            onChange={(e) => setWallet(e.target.value)}
+            onChange={(e) => {
+              const v = e.target.value;
+              setWallet(v);
+              localStorage.setItem(STORAGE_KEY, v);
+            }}
             placeholder="0x..."
           />
           <button className="btn-primary" onClick={fetchDashboard}>
