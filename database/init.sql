@@ -53,5 +53,21 @@ CREATE TABLE protocol_revenue_ledger (
     transaction_type VARCHAR(100) NOT NULL
 );
 
+CREATE TABLE hashrate_orders (
+    order_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
+    target_pool VARCHAR(50) NOT NULL CHECK (target_pool IN ('ZCASH', 'KASPA', 'LTC_DOGE')),
+    nicehash_order_id VARCHAR(255),
+    sandbox BOOLEAN NOT NULL DEFAULT FALSE,
+    usdc_cost NUMERIC(16, 4) NOT NULL,
+    protocol_fee_usdc NUMERIC(16, 4) NOT NULL,
+    btc_spent NUMERIC(20, 8) NOT NULL,
+    btc_spot_price NUMERIC(16, 4) NOT NULL,
+    algorithm VARCHAR(50) NOT NULL,
+    status VARCHAR(50) DEFAULT 'PENDING',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE INDEX idx_rigs_pool ON virtual_rigs(target_pool);
 CREATE INDEX idx_rewards_user ON user_rewards_ledger(user_id);
+CREATE INDEX idx_hashrate_orders_user ON hashrate_orders(user_id);

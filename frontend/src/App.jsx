@@ -59,6 +59,7 @@ export default function App() {
 
   const upgrade = async (pool) => {
     try {
+      setError('');
       const res = await fetch(`${API_BASE}/api/rigs/upgrade`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -66,7 +67,13 @@ export default function App() {
       });
       const result = await res.json();
       if (!res.ok) throw new Error(result.error || 'Upgrade failed');
-      fetchDashboard();
+
+      const sandboxTag = result.sandbox ? ' [SANDBOX]' : '';
+      const summary = result.btc_spent
+        ? `\n\nBTC spent: ${result.btc_spent}\nOrder ID: ${result.nicehash_order_id || 'n/a'}${sandboxTag}`
+        : '';
+      alert(`🎉 Upgrade successful! ${result.level} → hashrate ${result.hashrate} GH/s${summary}`);
+      await fetchDashboard();
     } catch (err) {
       setError(err.message);
     }
