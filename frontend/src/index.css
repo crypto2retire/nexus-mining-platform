@@ -174,6 +174,32 @@ body {
   font-weight: 700;
 }
 
+.stat-value.stat-small {
+  font-size: 0.8rem;
+  word-break: break-all;
+}
+
+.miner-panel {
+  margin-bottom: 1.25rem;
+}
+
+.miner-panel .card-stats {
+  grid-template-columns: repeat(6, 1fr);
+}
+
+@media (max-width: 900px) {
+  .miner-panel .card-stats {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+.miner-offline {
+  color: var(--muted);
+  font-size: 0.9rem;
+  margin: 0;
+  padding: 0.5rem 0;
+}
+
 .card-actions {
   display: flex;
   gap: 0.75rem;

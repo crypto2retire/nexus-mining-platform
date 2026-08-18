@@ -94,6 +94,7 @@ click). A repeated `request_id` returns the stored order (`duplicated: true`) wi
 - `GET /api/dashboard?wallet=0x...` — user dashboard
 - `POST /api/rigs/upgrade` — upgrade rig; body `{ wallet, target_pool, request_id }`
 - `POST /api/rewards/webhook` — external payout webhook (X-API-Secret protected)
+- `GET /api/miner/status` — live local miner stats (proxies XMRIG_API_URL, default local XMRig :8080)
 
 ## NiceHash setup (one-time, before going live)
 

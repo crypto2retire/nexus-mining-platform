@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import MiningRoomCard from './components/MiningRoomCard';
 import SummaryRow from './components/SummaryRow';
+import LiveMinerPanel from './components/LiveMinerPanel';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 const DEFAULT_WALLET = '0x0000000000000000000000000000000000000001';
@@ -128,6 +129,8 @@ export default function App() {
               totalHashrate={totalHashrate}
               pendingTotal={pendingTotal}
             />
+
+            <LiveMinerPanel />
 
             <section className="mining-grid">
               {POOLS.map((pool) => (
