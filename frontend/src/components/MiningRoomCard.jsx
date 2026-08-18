@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react';
 
 export default function MiningRoomCard({ title, pool, rig, pendingReward, onUpgrade }) {
   const [animating, setAnimating] = useState(false);
-  const level = rig?.level || 1;
-  const hashrate = rig?.virtual_hashrate || 0;
+  const level = Number(rig?.level) || 1;
+  const hashrate = Number(rig?.virtual_hashrate) || 0;
 
   const handleUpgrade = () => {
     setAnimating(true);
@@ -26,11 +26,11 @@ export default function MiningRoomCard({ title, pool, rig, pendingReward, onUpgr
         </div>
         <div className="stat">
           <span className="stat-label">Hashrate</span>
-          <span className="stat-value">{hashrate.toFixed(4)} GH/s</span>
+          <span className="stat-value">{Number(hashrate).toFixed(4)} GH/s</span>
         </div>
         <div className="stat">
           <span className="stat-label">Pending Yield</span>
-          <span className="stat-value accent">{pendingReward.toFixed(8)}</span>
+          <span className="stat-value accent">{Number(pendingReward).toFixed(8)}</span>
         </div>
       </div>
       <div className="card-actions">

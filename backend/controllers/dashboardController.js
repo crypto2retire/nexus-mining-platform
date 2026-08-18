@@ -37,11 +37,19 @@ async function getDashboard(req, res) {
         [userId]
       );
 
-      const pools = ['ZCASH', 'KASPA', 'LTC_DOGE'];
+      const pools = ['ZCASH', 'KASPA', 'LTC_DOGE', 'XMR'];
       const rigsByPool = {};
       for (const pool of pools) {
         const rig = rigs.rows.find(r => r.target_pool === pool);
-        rigsByPool[pool] = rig || null;
+        // pg returns NUMERIC as strings — coerce so the frontend can call .toFixed()
+        rigsByPool[pool] = rig
+          ? {
+              rig_id: rig.rig_id,
+              target_pool: rig.target_pool,
+              virtual_hashrate: Number(rig.virtual_hashrate),
+              level: Number(rig.level),
+            }
+          : null;
       }
 
       const rewards = await client.query(

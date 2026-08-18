@@ -91,12 +91,12 @@ export default function App() {
 
   const totalHashrate = useMemo(() => {
     if (!data) return 0;
-    return POOLS.reduce((sum, p) => sum + (data.rigs[p.key]?.virtual_hashrate || 0), 0);
+    return POOLS.reduce((sum, p) => sum + (Number(data.rigs[p.key]?.virtual_hashrate) || 0), 0);
   }, [data]);
 
   const pendingTotal = useMemo(() => {
     if (!data) return 0;
-    return POOLS.reduce((sum, p) => sum + (data.pending_rewards[p.key] || 0), 0);
+    return POOLS.reduce((sum, p) => sum + (Number(data.pending_rewards[p.key]) || 0), 0);
   }, [data]);
 
   const animated = useAnimatedPending(data?.pending_rewards || {});
