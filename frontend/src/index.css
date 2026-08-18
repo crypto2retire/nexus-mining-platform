@@ -273,6 +273,41 @@ button:disabled {
   color: #0b1220;
 }
 
+.miner-controls .btn-balance {
+  background: rgba(52, 211, 153, 0.9);
+  color: #0b1220;
+}
+
+.balance-card {
+  border: 1px solid rgba(52, 211, 153, 0.35);
+  background: rgba(52, 211, 153, 0.07);
+  border-radius: 0.5rem;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+}
+
+.balance-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 0.2rem 0;
+  font-size: 0.85rem;
+}
+
+.balance-usd {
+  color: var(--muted, #94a3b8);
+  font-size: 0.8rem;
+}
+
+.balance-meta {
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid rgba(148, 163, 184, 0.2);
+  font-size: 0.72rem;
+  color: var(--muted, #94a3b8);
+  word-break: break-all;
+}
+
 .miner-action-msg {
   font-size: 0.8rem;
   color: var(--muted, #94a3b8);

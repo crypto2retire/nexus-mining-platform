@@ -38,6 +38,25 @@ export default function LiveMinerPanel() {
   const online = Boolean(status?.online);
   const [busy, setBusy] = useState(false);
   const [actionMsg, setActionMsg] = useState('');
+  const [balance, setBalance] = useState(null);
+  const [balanceError, setBalanceError] = useState('');
+
+  const checkBalance = async () => {
+    setBusy(true);
+    setBalanceError('');
+    try {
+      const res = await fetch(`${API_BASE}/api/miner/balance`);
+      if (!res.ok) throw new Error(`status ${res.status}`);
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || 'balance unavailable');
+      setBalance(data);
+    } catch (err) {
+      setBalanceError(err.message);
+      setBalance(null);
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const runAction = async (action) => {
     setBusy(true);
@@ -70,6 +89,7 @@ export default function LiveMinerPanel() {
       </div>
 
       {error && <div className="error-banner">Miner monitor: {error}</div>}
+      {balanceError && <div className="error-banner">Balance: {balanceError}</div>}
 
       <div className="miner-controls">
         <button
@@ -86,8 +106,59 @@ export default function LiveMinerPanel() {
         >
           ■ Stop Miner
         </button>
+        <button
+          className="btn btn-balance"
+          disabled={busy}
+          onClick={checkBalance}
+        >
+          💰 Check Balance
+        </button>
         {actionMsg && <span className="miner-action-msg">{actionMsg}</span>}
       </div>
+
+      {balance && (
+        <div className="balance-card">
+          <div className="balance-row">
+            <span className="stat-label">Pool balance (unpaid)</span>
+            <span className="stat-value accent">
+              {balance.unpaid_xmr ?? '…'} XMR
+              {balance.unpaid_usd != null && (
+                <span className="balance-usd"> ≈ ${balance.unpaid_usd}</span>
+              )}
+            </span>
+          </div>
+          <div className="balance-row">
+            <span className="stat-label">Unlocked / Unconfirmed</span>
+            <span className="stat-value">
+              {balance.unlocked_xmr ?? '…'} / {balance.unconfirmed_xmr ?? '…'} XMR
+            </span>
+          </div>
+          <div className="balance-row">
+            <span className="stat-label">Payments (24h / 7d)</span>
+            <span className="stat-value">
+              {balance.payments_24h ?? '…'} / {balance.payments_7d ?? '…'}
+            </span>
+          </div>
+          <div className="balance-row">
+            <span className="stat-label">XMR price</span>
+            <span className="stat-value">
+              {balance.xmr_usd_price != null ? `$${balance.xmr_usd_price}` : 'n/a'}
+            </span>
+          </div>
+          {balance.last_payment && (
+            <div className="balance-row">
+              <span className="stat-label">Last payout</span>
+              <span className="stat-value stat-small">
+                {balance.last_payment.amount} XMR · {balance.last_payment.hash ? balance.last_payment.hash.slice(0, 12) : ''}
+              </span>
+            </div>
+          )}
+          <div className="balance-meta">
+            Address: {balance.address ? `${balance.address.slice(0, 12)}…${balance.address.slice(-8)}` : '…'}
+            {balance.fetched_at ? ` · fetched ${new Date(balance.fetched_at).toLocaleTimeString()}` : ''}
+          </div>
+        </div>
+      )}
 
       {online ? (
         <div className="card-stats">

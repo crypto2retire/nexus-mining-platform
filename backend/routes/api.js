@@ -4,6 +4,7 @@ const { upgradeRig } = require('../controllers/upgradeController');
 const { handleRewardWebhook } = require('../services/rewardDistributor');
 const { getMinerStatus } = require('../services/minerMonitor');
 const { startMiner, stopMiner, authorizeControl } = require('../services/minerControl');
+const { getPoolBalance } = require('../services/poolBalance');
 
 const router = express.Router();
 
@@ -15,6 +16,15 @@ router.get('/miner/status', async (_req, res) => {
     res.json(await getMinerStatus());
   } catch (err) {
     res.status(500).json({ online: false, error: err.message });
+  }
+});
+
+// Live pool balance (unpaid Monero + USD value). Optional ?address= override.
+router.get('/miner/balance', async (req, res) => {
+  try {
+    res.json(await getPoolBalance(req.query.address));
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 
