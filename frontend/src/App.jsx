@@ -100,6 +100,11 @@ export default function App() {
     return POOLS.reduce((sum, p) => sum + (Number(data.pending_rewards[p.key]) || 0), 0);
   }, [data]);
 
+  const isEmptyAccount = useMemo(
+    () => data && totalHashrate === 0 && pendingTotal === 0 && Number(data.usdc_balance) === 0,
+    [data, totalHashrate, pendingTotal]
+  );
+
   const animated = useAnimatedPending(data?.pending_rewards || {});
 
   return (
@@ -129,6 +134,14 @@ export default function App() {
 
         {data && (
           <>
+            {isEmptyAccount && (
+              <div className="empty-wallet-banner">
+                This wallet has no mining account yet. The demo account is{' '}
+                <code>0x1111111111111111111111111111111111111111</code> — paste it in the
+                wallet box above, then click <strong>Connect Wallet</strong>.
+              </div>
+            )}
+
             <SummaryRow
               balance={data.usdc_balance}
               totalHashrate={totalHashrate}

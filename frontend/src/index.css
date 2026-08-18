@@ -250,6 +250,22 @@ button:disabled {
   margin-bottom: 1rem;
 }
 
+.empty-wallet-banner {
+  background: rgba(251, 191, 36, 0.12);
+  color: #fbbf24;
+  border: 1px solid rgba(251, 191, 36, 0.4);
+  padding: 0.75rem 1rem;
+  border-radius: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.empty-wallet-banner code {
+  background: rgba(0, 0, 0, 0.35);
+  padding: 0.1rem 0.4rem;
+  border-radius: 0.25rem;
+  font-size: 0.85em;
+}
+
 .loading {
   text-align: center;
   color: var(--muted);

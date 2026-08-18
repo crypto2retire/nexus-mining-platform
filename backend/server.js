@@ -14,8 +14,21 @@ app.use(express.json());
 app.use('/api', apiRouter);
 
 if (process.env.NODE_ENV === 'production') {
-  app.use(express.static(path.join(__dirname, '../frontend/dist')));
+  // index.html must always revalidate so new builds reach users;
+  // hashed assets are immutable by filename so cache them hard.
+  app.use(
+    express.static(path.join(__dirname, '../frontend/dist'), {
+      setHeaders(res, filePath) {
+        if (filePath.endsWith('index.html')) {
+          res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+        } else {
+          res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        }
+      },
+    })
+  );
   app.get('*', (_req, res) => {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
     res.sendFile(path.join(__dirname, '../frontend/dist/index.html'));
   });
 }
