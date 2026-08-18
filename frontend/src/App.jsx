@@ -60,17 +60,21 @@ export default function App() {
   const upgrade = async (pool) => {
     try {
       setError('');
+      // Idempotency key: prevents double-click / network retry from placing two orders.
+      const requestId = crypto.randomUUID
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
       const res = await fetch(`${API_BASE}/api/rigs/upgrade`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ wallet, target_pool: pool }),
+        body: JSON.stringify({ wallet, target_pool: pool, request_id: requestId }),
       });
       const result = await res.json();
       if (!res.ok) throw new Error(result.error || 'Upgrade failed');
 
       const sandboxTag = result.sandbox ? ' [SANDBOX]' : '';
       const summary = result.btc_spent
-        ? `\n\nBTC spent: ${result.btc_spent}\nOrder ID: ${result.nicehash_order_id || 'n/a'}${sandboxTag}`
+        ? `\n\nBTC spent: ${result.btc_spent}\nOrder ID: ${result.nicehash_order_id || 'n/a'}\nStatus: ${result.order_status || 'n/a'}${sandboxTag}`
         : '';
       alert(`🎉 Upgrade successful! ${result.level} → hashrate ${result.hashrate} GH/s${summary}`);
       await fetchDashboard();

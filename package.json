@@ -10,7 +10,7 @@
     "dev:frontend": "cd frontend && npm run dev",
     "build": "cd frontend && npm install --no-audit --no-fund && npm run build",
     "start": "cd backend && node server.js",
-    "test": "cd backend && jest",
+    "test": "jest --config jest.config.js",
     "lint": "eslint backend/"
   },
   "dependencies": {

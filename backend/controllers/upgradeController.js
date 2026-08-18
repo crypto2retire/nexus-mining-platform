@@ -1,6 +1,10 @@
 const { pool } = require('../config/db');
 const { getLiveBtcPrice } = require('../services/priceOracle');
-const { placeHashpowerOrder, POOL_ALGORITHM_MAP } = require('../services/hashrateRenter');
+const {
+  placeHashpowerOrder,
+  getOrderStatus,
+  POOL_ALGORITHM_MAP,
+} = require('../services/hashrateRenter');
 
 const UPGRADE_TIERS = [
   { level: 1, cost: 0, hashrate: 10 },
@@ -16,22 +20,83 @@ function toSatPrecision(value) {
   return parseFloat(value.toFixed(8));
 }
 
+const ORDER_SELECT = `
+  SELECT h.order_id, h.status, h.nicehash_order_id, h.sandbox, h.usdc_cost,
+         h.protocol_fee_usdc, h.btc_spent, h.btc_spot_price, h.price_feed,
+         h.price_is_usdc_pair, h.failure_reason, h.request_id,
+         r.level, r.virtual_hashrate
+  FROM hashrate_orders h
+  LEFT JOIN virtual_rigs r ON r.user_id = h.user_id AND r.target_pool = h.target_pool
+`;
+
+function duplicateResponse(row) {
+  return {
+    success: true,
+    duplicated: true,
+    order_status: row.status,
+    nicehash_order_id: row.nicehash_order_id || null,
+    btc_spent: Number(row.btc_spent),
+    btc_spot_price: Number(row.btc_spot_price),
+    price_feed: row.price_feed,
+    protocol_fee_usdc: Number(row.protocol_fee_usdc),
+    sandbox: Boolean(row.sandbox),
+    level: row.level ? Number(row.level) : null,
+    hashrate: row.virtual_hashrate ? Number(row.virtual_hashrate) : null,
+    request_id: row.request_id,
+  };
+}
+
 async function upgradeRig(req, res) {
+  const walletAddress = (req.body.wallet || '').toLowerCase();
+  const targetPool = req.body.target_pool;
+  const requestId = String(req.body.request_id || '').trim();
+
+  if (!walletAddress || !/^0x[a-f0-9]{40}$/i.test(walletAddress)) {
+    return res.status(400).json({ error: 'Valid wallet address is required' });
+  }
+  if (!['ZCASH', 'KASPA', 'LTC_DOGE'].includes(targetPool)) {
+    return res.status(400).json({ error: 'Invalid target pool' });
+  }
+  if (!requestId || requestId.length > 64) {
+    return res.status(400).json({ error: 'request_id is required (1-64 chars) for idempotent upgrades' });
+  }
+
+  // SAFETY RAIL: never move user funds unless a REAL NiceHash order can be placed.
+  if (process.env.NODE_ENV === 'production' && process.env.NICEHASH_LIVE_ORDERS !== '1') {
+    return res.status(503).json({
+      error:
+        'Live NiceHash orders are not enabled. Set NICEHASH_LIVE_ORDERS=1 after configuring ' +
+        'NICEHASH_API_KEY/NICEHASH_API_SECRET/NICEHASH_ORG_ID. No funds were moved.',
+    });
+  }
+
+  // Idempotency: an identical request_id returns the stored result instead of
+  // double-charging. The unique index (checked again inside the tx) makes this race-safe.
+  const existing = await pool.query(`${ORDER_SELECT} WHERE h.request_id = $1`, [requestId]);
+  if (existing.rowCount > 0) {
+    return res.json(duplicateResponse(existing.rows[0]));
+  }
+
+  // Fetch the live BTC/USDC price BEFORE opening the transaction — never hold
+  // row locks during network I/O.
+  let quote;
+  try {
+    quote = await getLiveBtcPrice();
+  } catch (err) {
+    return res.status(502).json({ error: `Price oracle unavailable: ${err.message}` });
+  }
+  const btcSpotPrice = quote.price;
+
   const client = await pool.connect();
+  let orderRecordId = null;
+  let walletId = null;
+  let newBalance = null;
+  let nextTier = null;
+  let protocolFeeUsdc = null;
+  let spendBtcAmount = null;
+
   try {
     await client.query('BEGIN');
-
-    const walletAddress = (req.body.wallet || '').toLowerCase();
-    const targetPool = req.body.target_pool;
-
-    if (!walletAddress || !/^0x[a-f0-9]{40}$/i.test(walletAddress)) {
-      await client.query('ROLLBACK');
-      return res.status(400).json({ error: 'Valid wallet address is required' });
-    }
-    if (!['ZCASH', 'KASPA', 'LTC_DOGE'].includes(targetPool)) {
-      await client.query('ROLLBACK');
-      return res.status(400).json({ error: 'Invalid target pool' });
-    }
 
     const userResult = await client.query(
       'SELECT user_id FROM users WHERE LOWER(wallet_address) = $1 FOR UPDATE',
@@ -48,49 +113,71 @@ async function upgradeRig(req, res) {
       [userId]
     );
     const wallet = walletResult.rows[0];
+    walletId = wallet.wallet_id;
 
     const rigResult = await client.query(
       'SELECT rig_id, level, virtual_hashrate FROM virtual_rigs WHERE user_id = $1 AND target_pool = $2 FOR UPDATE',
       [userId, targetPool]
     );
-
-    let rig = rigResult.rows[0];
+    const rig = rigResult.rows[0];
     const currentLevel = rig ? rig.level : 1;
-    const nextTier = UPGRADE_TIERS.find((t) => t.level === currentLevel + 1);
 
+    nextTier = UPGRADE_TIERS.find((t) => t.level === currentLevel + 1);
     if (!nextTier) {
       await client.query('ROLLBACK');
       return res.status(400).json({ error: 'Already at max level' });
     }
-
     if (Number(wallet.usdc_balance) < nextTier.cost) {
       await client.query('ROLLBACK');
       return res.status(400).json({ error: 'Insufficient USDC balance' });
     }
 
-    // Fetch live BTC/USDC spot price and convert net fee proceeds to BTC.
-    const btcSpotPrice = await getLiveBtcPrice();
-    const protocolFeeUsdc = toSatPrecision(nextTier.cost * PROTOCOL_FEE_PCT);
+    protocolFeeUsdc = toSatPrecision(nextTier.cost * PROTOCOL_FEE_PCT);
     const netPurchaseUsdc = toSatPrecision(nextTier.cost - protocolFeeUsdc);
-    const spendBtcAmount = toSatPrecision(netPurchaseUsdc / btcSpotPrice);
+    spendBtcAmount = toSatPrecision(netPurchaseUsdc / btcSpotPrice);
 
-    // Attempt to place the NiceHash hashpower order (sandboxed outside production).
-    const orderResult = await placeHashpowerOrder(targetPool, spendBtcAmount);
-    if (!orderResult.success) {
+    // Reserve the request_id with a PENDING order row. ON CONFLICT DO NOTHING
+    // catches concurrent duplicate submissions; we then return the winner's row.
+    const orderInsert = await client.query(
+      `INSERT INTO hashrate_orders
+         (user_id, target_pool, request_id, usdc_cost, protocol_fee_usdc, btc_spent,
+          btc_spot_price, price_feed, price_is_usdc_pair, algorithm, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'PENDING')
+       ON CONFLICT (request_id) DO NOTHING
+       RETURNING order_id`,
+      [
+        userId,
+        targetPool,
+        requestId,
+        nextTier.cost,
+        protocolFeeUsdc,
+        spendBtcAmount,
+        toSatPrecision(btcSpotPrice),
+        quote.feed,
+        quote.isUsdcPair,
+        POOL_ALGORITHM_MAP[targetPool],
+      ]
+    );
+    if (orderInsert.rowCount === 0) {
+      // Lost the race — a concurrent identical request already reserved this id.
       await client.query('ROLLBACK');
-      return res.status(502).json({ error: `Hashrate marketplace order failed: ${orderResult.error}` });
+      const winner = await pool.query(`${ORDER_SELECT} WHERE h.request_id = $1`, [requestId]);
+      return res.json(duplicateResponse(winner.rows[0]));
     }
+    orderRecordId = orderInsert.rows[0].order_id;
 
-    // Deduct balance, record fee, upgrade rig.
-    const newBalance = toSatPrecision(Number(wallet.usdc_balance) - nextTier.cost);
+    // Deduct the user's USDC balance.
+    newBalance = toSatPrecision(Number(wallet.usdc_balance) - nextTier.cost);
     await client.query(
       'UPDATE user_wallets SET usdc_balance = $1, updated_at = CURRENT_TIMESTAMP WHERE wallet_id = $2',
-      [newBalance, wallet.wallet_id]
+      [newBalance, walletId]
     );
 
+    // Revenue ledger books ONLY the 5% protocol fee. The other 95% is a
+    // pass-through to the NiceHash marketplace, NOT platform revenue.
     await client.query(
       'INSERT INTO protocol_revenue_ledger (source_user_id, amount_usdc, transaction_type) VALUES ($1, $2, $3)',
-      [userId, nextTier.cost, 'RIG_UPGRADE']
+      [userId, protocolFeeUsdc, 'RIG_UPGRADE']
     );
 
     if (rig) {
@@ -105,37 +192,7 @@ async function upgradeRig(req, res) {
       );
     }
 
-    // Audit trail: store the NiceHash order linkage.
-    await client.query(
-      `INSERT INTO hashrate_orders
-       (user_id, target_pool, nicehash_order_id, sandbox, usdc_cost, protocol_fee_usdc, btc_spent, btc_spot_price, algorithm, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-      [
-        userId,
-        targetPool,
-        orderResult.orderId || null,
-        Boolean(orderResult.sandbox),
-        nextTier.cost,
-        protocolFeeUsdc,
-        spendBtcAmount,
-        toSatPrecision(btcSpotPrice),
-        POOL_ALGORITHM_MAP[targetPool],
-        orderResult.sandbox ? 'SIMULATED' : 'PLACED',
-      ]
-    );
-
     await client.query('COMMIT');
-    return res.json({
-      success: true,
-      level: nextTier.level,
-      hashrate: nextTier.hashrate,
-      remaining_balance: newBalance,
-      btc_spent: spendBtcAmount,
-      btc_spot_price: toSatPrecision(btcSpotPrice),
-      protocol_fee_usdc: protocolFeeUsdc,
-      nicehash_order_id: orderResult.orderId || null,
-      sandbox: Boolean(orderResult.sandbox),
-    });
   } catch (err) {
     await client.query('ROLLBACK');
     console.error('Upgrade error:', err);
@@ -143,6 +200,71 @@ async function upgradeRig(req, res) {
   } finally {
     client.release();
   }
+
+  // Place the order AFTER commit: a failed commit must never leave a live order
+  // unrecorded, and a failed order must never corrupt the DB transaction.
+  const orderResult = await placeHashpowerOrder(targetPool, spendBtcAmount);
+
+  if (!orderResult.success) {
+    // Compensate: refund the user and mark the order row FAILED/REFUNDED.
+    const refundClient = await pool.connect();
+    try {
+      await refundClient.query('BEGIN');
+      await refundClient.query(
+        'UPDATE user_wallets SET usdc_balance = usdc_balance + $1, updated_at = CURRENT_TIMESTAMP WHERE wallet_id = $2',
+        [nextTier.cost, walletId]
+      );
+      await refundClient.query(
+        `UPDATE hashrate_orders SET status = 'REFUNDED', failure_reason = $1, updated_at = CURRENT_TIMESTAMP WHERE order_id = $2`,
+        [orderResult.error, orderRecordId]
+      );
+      await refundClient.query('COMMIT');
+      console.error(`Order failed for request ${requestId}; ${nextTier.cost} USDC refunded to ${walletAddress}`);
+    } catch (refundErr) {
+      await refundClient.query('ROLLBACK');
+      console.error('❌ CRITICAL: refund failed after order error:', refundErr.message);
+    } finally {
+      refundClient.release();
+    }
+    return res.status(502).json({
+      error: `Hashrate marketplace order failed: ${orderResult.error}. USDC refunded.`,
+    });
+  }
+
+  const status = orderResult.mode === 'live' ? 'PLACED' : 'SIMULATED';
+  await pool.query(
+    `UPDATE hashrate_orders
+       SET nicehash_order_id = $1, status = $2, sandbox = $3, updated_at = CURRENT_TIMESTAMP
+     WHERE order_id = $4`,
+    [orderResult.orderId || null, status, orderResult.mode !== 'live', orderRecordId]
+  );
+
+  let niceHashStatus = null;
+  if (orderResult.orderId && orderResult.mode === 'live') {
+    try {
+      const st = await getOrderStatus(orderResult.orderId);
+      niceHashStatus = st?.status || null;
+    } catch (err) {
+      console.warn('Could not refresh NiceHash order status:', err.message);
+    }
+  }
+
+  return res.json({
+    success: true,
+    duplicated: false,
+    level: nextTier.level,
+    hashrate: nextTier.hashrate,
+    remaining_balance: newBalance,
+    btc_spent: spendBtcAmount,
+    btc_spot_price: toSatPrecision(btcSpotPrice),
+    price_feed: quote.feed,
+    protocol_fee_usdc: protocolFeeUsdc,
+    nicehash_order_id: orderResult.orderId || null,
+    order_status: status,
+    nicehash_status: niceHashStatus,
+    sandbox: orderResult.mode !== 'live',
+    request_id: requestId,
+  });
 }
 
-module.exports = { upgradeRig, UPGRADE_TIERS };
+module.exports = { upgradeRig, UPGRADE_TIERS, PROTOCOL_FEE_PCT };

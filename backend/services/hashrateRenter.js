@@ -1,21 +1,40 @@
 const axios = require('axios');
 const crypto = require('crypto');
 
-const IS_PROD = process.env.NODE_ENV === 'production';
+/**
+ * NiceHash Hashrate Marketplace client (API v2, HMAC-signed).
+ *
+ * SAFETY RAILS — real orders move real BTC, so live placement requires ALL of:
+ *   1. NODE_ENV === 'production'
+ *   2. NICEHASH_API_KEY / NICEHASH_API_SECRET / NICEHASH_ORG_ID set
+ *   3. NICEHASH_LIVE_ORDERS === '1' (explicit opt-in)
+ * Any other combination returns a simulated sandbox order (or a hard error in
+ * production when live placement is requested but not enabled). The controller
+ * layer refuses to move user funds unless the order was REALLY placed.
+ */
 
-const NICEHASH_HOST = IS_PROD
-  ? 'https://api2.nicehash.com'
-  : 'https://api-test.nicehash.com';
-
-const API_KEY = process.env.NICEHASH_API_KEY || '';
-const API_SECRET = process.env.NICEHASH_API_SECRET || '';
-const ORG_ID = process.env.NICEHASH_ORG_ID || '';
+const NICEHASH_HOST = 'https://api2.nicehash.com';
+const NICEHASH_TEST_HOST = 'https://api-test.nicehash.com';
 
 const POOL_ALGORITHM_MAP = {
   ZCASH: 'ZHASH',
   KASPA: 'KHEAVYHASH',
   LTC_DOGE: 'SCRYPT',
 };
+
+function isLiveMode() {
+  return (
+    process.env.NODE_ENV === 'production' &&
+    Boolean(process.env.NICEHASH_API_KEY) &&
+    Boolean(process.env.NICEHASH_API_SECRET) &&
+    Boolean(process.env.NICEHASH_ORG_ID) &&
+    process.env.NICEHASH_LIVE_ORDERS === '1'
+  );
+}
+
+function to8(value) {
+  return parseFloat(Number(value).toFixed(8));
+}
 
 function getEpochMs() {
   return Date.now();
@@ -25,13 +44,23 @@ function generateNonce() {
   return crypto.randomUUID();
 }
 
-function buildSignature({ xTime, xNonce, method, path, query, body }) {
+/**
+ * Builds the NiceHash API v2 HMAC-SHA256 signature.
+ * Message layout (per NiceHash docs / rest-clients-demo):
+ *   apiKey \0 time \0 nonce \0 "" \0 orgId \0 "" \0 METHOD \0 path \0 query [ \0 body ]
+ * @returns {string} hex signature
+ */
+function buildSignature({ xTime, xNonce, method, path, query, body, apiKey, apiSecret, orgId }) {
+  const key = apiKey || process.env.NICEHASH_API_KEY || '';
+  const secret = apiSecret || process.env.NICEHASH_API_SECRET || '';
+  const organizationId = orgId || process.env.NICEHASH_ORG_ID || '';
+
   const msgParts = [
-    API_KEY,
+    key,
     xTime,
     xNonce,
     '', // empty field
-    ORG_ID,
+    organizationId,
     '', // empty field
     method.toUpperCase(),
     path,
@@ -45,7 +74,7 @@ function buildSignature({ xTime, xNonce, method, path, query, body }) {
   }
 
   return crypto
-    .createHmac('sha256', API_SECRET)
+    .createHmac('sha256', secret)
     .update(message)
     .digest('hex');
 }
@@ -68,24 +97,37 @@ async function makeNiceHashRequest(method, path, query = null, bodyObj = null) {
   const headers = {
     'X-Time': String(xTime),
     'X-Nonce': xNonce,
-    'X-Auth': `${API_KEY}:${signature}`,
-    'X-Organization-Id': ORG_ID,
+    'X-Auth': `${process.env.NICEHASH_API_KEY}:${signature}`,
+    'X-Organization-Id': process.env.NICEHASH_ORG_ID,
     'X-Request-Id': crypto.randomUUID(),
     'Content-Type': 'application/json',
   };
 
   const url = `${NICEHASH_HOST}${path}${queryString ? `?${queryString}` : ''}`;
-  const response = await axios({
-    method,
-    url,
-    headers,
-    data: body,
-    timeout: 30000,
-  });
+
+  // CRITICAL: only attach `data` when there is a body. NiceHash returns 400 on
+  // GET requests that carry `data: null` + Content-Type: application/json
+  // (axios sends an empty JSON payload the server treats as malformed).
+  const requestConfig = { method, url, headers, timeout: 30000 };
+  if (body) {
+    requestConfig.data = body;
+  }
+
+  const response = await axios(requestConfig);
 
   return response.data;
 }
 
+/** Algorithm limits & market factors. Always validate before placing an order. */
+async function getAlgorithms() {
+  const data = await makeNiceHashRequest(
+    'GET',
+    '/main/api/v2/mining/algorithms'
+  );
+  return data;
+}
+
+/** Per-algorithm order book info (min price, min amount, limits). */
 async function getBuyInfo(algorithm) {
   const data = await makeNiceHashRequest(
     'GET',
@@ -95,22 +137,40 @@ async function getBuyInfo(algorithm) {
   return data;
 }
 
+/** Order status lookup for audit/UI. */
+async function getOrderStatus(orderId) {
+  const data = await makeNiceHashRequest(
+    'GET',
+    `/main/api/v2/hashpower/order/${encodeURIComponent(orderId)}/`
+  );
+  return data;
+}
+
 /**
- * Places a NiceHash hashpower order.
- * In non-production mode (or when credentials are missing), returns a sandbox
- * order response without touching real funds.
+ * Places a NiceHash hashpower order for the given target pool.
  *
  * @param {string} targetPool - one of ZCASH, KASPA, LTC_DOGE
- * @param {number} spendBtcAmount - BTC amount to spend (e.g. 0.00123456)
- * @returns {Promise<{success: boolean, orderId?: string, sandbox?: boolean, error?: string}>}
+ * @param {number} spendBtcAmount - BTC amount to spend (e.g. 0.000475)
+ * @returns {Promise<{success: boolean, mode: 'sandbox'|'live', orderId?: string, sandbox?: boolean, error?: string, niceHashResponse?: object}>}
  */
 async function placeHashpowerOrder(targetPool, spendBtcAmount) {
   const algorithm = POOL_ALGORITHM_MAP[targetPool];
   if (!algorithm) {
-    return { success: false, error: `Unknown target pool: ${targetPool}` };
+    return { success: false, mode: 'sandbox', error: `Unknown target pool: ${targetPool}` };
   }
 
-  if (!IS_PROD || !API_KEY || !API_SECRET || !ORG_ID) {
+  // Production without explicit live opt-in must NEVER silently simulate.
+  if (process.env.NODE_ENV === 'production' && !isLiveMode()) {
+    return {
+      success: false,
+      mode: 'sandbox',
+      error:
+        'Live NiceHash orders are not enabled. Set NICEHASH_LIVE_ORDERS=1 and configure ' +
+        'NICEHASH_API_KEY/NICEHASH_API_SECRET/NICEHASH_ORG_ID before going live.',
+    };
+  }
+
+  if (!isLiveMode()) {
     console.warn('🏖️ Sandbox mode: NiceHash order simulated.', {
       targetPool,
       algorithm,
@@ -118,51 +178,86 @@ async function placeHashpowerOrder(targetPool, spendBtcAmount) {
     });
     return {
       success: true,
+      mode: 'sandbox',
       orderId: `sandbox-${crypto.randomUUID()}`,
       sandbox: true,
     };
   }
 
   try {
-    const buyInfo = await getBuyInfo(algorithm);
-    const market = buyInfo?.market || 'EU';
-    const marketFactor = buyInfo?.marketFactor || 1;
-    const displayMarketFactor = buyInfo?.displayMarketFactor || 'GH';
-    const displayPriceFactor = buyInfo?.displayPriceFactor || 'GH';
-    const priceFactor = buyInfo?.priceFactor || 1;
-    const minAmount = buyInfo?.minAmount || 0.001;
-    const minPrice = buyInfo?.minPrice || 0.0001;
+    const poolId = process.env.NICEHASH_POOL_ID || '';
+    if (!poolId) {
+      return {
+        success: false,
+        mode: 'live',
+        error:
+          'NICEHASH_POOL_ID is required for live orders. Create a pool via POST /main/api/v2/pool first.',
+      };
+    }
 
-    const amount = Math.max(parseFloat(spendBtcAmount.toFixed(8)), minAmount);
-    const price = Math.max(minPrice, parseFloat((amount * 0.0001).toFixed(8)));
-    const limit = 0; // unlimited speed
+    // Pull real limits from the marketplace (official demo flow):
+    //   - /main/api/v2/mining/algorithms -> marketFactor, displayMarketFactor, order limits
+    //   - /main/api/v2/public/buy/info    -> min price/amount per algorithm
+    const [algoRes, buyInfo] = await Promise.all([
+      getAlgorithms(),
+      getBuyInfo(algorithm),
+    ]);
+    const algo = (algoRes?.miningAlgorithms || []).find(
+      (a) => a?.algorithm === algorithm
+    );
+    const book = (buyInfo?.miningAlgorithms || []).find(
+      (a) => String(a?.name || a?.algorithm || '').toUpperCase() === algorithm.toUpperCase()
+    );
+
+    const minimalOrderAmount = Number(algo?.minimalOrderAmount ?? book?.min_amount ?? 0.001);
+    const minSpeedLimit = Number(algo?.minSpeedLimit ?? book?.min_limit ?? 0);
+    const maxSpeedLimit = Number(algo?.maxSpeedLimit ?? book?.max_limit ?? 0);
+    const minPrice = Number(book?.min_price ?? 0.0001);
+    const marketFactor = Number(algo?.marketFactor ?? 1);
+    const displayMarketFactor = algo?.displayMarketFactor || 'GH';
+    const market = process.env.NICEHASH_MARKET || 'EU';
+
+    // Financial integrity: never place an order that spends MORE than the user
+    // paid just to satisfy the marketplace minimum. Below-minimum upgrades are
+    // rejected; the controller refunds the user automatically.
+    if (to8(spendBtcAmount) < minimalOrderAmount) {
+      return {
+        success: false,
+        mode: 'live',
+        error: `Upgrade below NiceHash marketplace minimum order amount (${minimalOrderAmount} BTC) for ${algorithm}.`,
+      };
+    }
+
+    const amount = to8(spendBtcAmount);
+    const price = Math.max(
+      Number(process.env.NICEHASH_ORDER_PRICE || minPrice),
+      minPrice
+    );
+    const configuredLimit = Number(process.env.NICEHASH_ORDER_LIMIT || minSpeedLimit || 0);
+    const limit = maxSpeedLimit > 0 ? Math.min(configuredLimit, maxSpeedLimit) : configuredLimit;
 
     const body = {
       market,
       algorithm,
       type: 'STANDARD',
-      currencyMarket: 'BTC',
       amount,
       price,
       limit,
       marketFactor,
       displayMarketFactor,
-      priceFactor,
-      displayPriceFactor,
-      // NOTE: poolId must be a real NiceHash pool registered under your account.
-      // For sandbox mode this is skipped. In production, create a pool first via POST /main/api/v2/pool
-      poolId: process.env.NICEHASH_POOL_ID || '',
+      poolId,
     };
 
     const result = await makeNiceHashRequest(
       'POST',
-      '/main/api/v2/hashpower/order',
+      '/main/api/v2/hashpower/order/',
       null,
       body
     );
 
     return {
       success: true,
+      mode: 'live',
       orderId: result?.id || result?.orderId || null,
       niceHashResponse: result,
     };
@@ -170,9 +265,21 @@ async function placeHashpowerOrder(targetPool, spendBtcAmount) {
     console.error('❌ NiceHash order placement failed:', err.response?.data || err.message);
     return {
       success: false,
+      mode: 'live',
       error: err.response?.data?.errors?.[0]?.message || err.message,
     };
   }
 }
 
-module.exports = { placeHashpowerOrder, POOL_ALGORITHM_MAP };
+module.exports = {
+  placeHashpowerOrder,
+  getOrderStatus,
+  getBuyInfo,
+  getAlgorithms,
+  buildSignature,
+  makeNiceHashRequest,
+  isLiveMode,
+  POOL_ALGORITHM_MAP,
+  NICEHASH_HOST,
+  NICEHASH_TEST_HOST,
+};
