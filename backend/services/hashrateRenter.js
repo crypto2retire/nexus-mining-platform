@@ -26,6 +26,9 @@ function getNiceHashHost() {
 const NICEHASH_HOST = 'https://api2.nicehash.com';
 const NICEHASH_TEST_HOST = 'https://api-test.nicehash.com';
 
+const PROVIDER_NAME = 'NICEHASH';
+const LIVE_ORDERS_ENV = 'NICEHASH_LIVE_ORDERS';
+
 const POOL_ALGORITHM_MAP = {
   ZCASH: 'ZHASH',
   KASPA: 'KHEAVYHASH',
@@ -301,6 +304,8 @@ module.exports = {
   makeNiceHashRequest,
   isLiveMode,
   POOL_ALGORITHM_MAP,
+  PROVIDER_NAME,
+  LIVE_ORDERS_ENV,
   NICEHASH_HOST,
   NICEHASH_TEST_HOST,
 };

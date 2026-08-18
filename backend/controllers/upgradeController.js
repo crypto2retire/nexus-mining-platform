@@ -1,10 +1,18 @@
 const { pool } = require('../config/db');
 const { getLiveBtcPrice } = require('../services/priceOracle');
-const {
-  placeHashpowerOrder,
-  getOrderStatus,
-  POOL_ALGORITHM_MAP,
-} = require('../services/hashrateRenter');
+
+/**
+ * Marketplace provider selection. Default = NiceHash. Set
+ * MARKETPLACE_PROVIDER=mrr to route real hashpower orders through
+ * MiningRigRentals instead. Both providers expose the same interface:
+ * placeHashpowerOrder / getOrderStatus / POOL_ALGORITHM_MAP, plus
+ * PROVIDER_NAME and LIVE_ORDERS_ENV for the production safety rail.
+ */
+function getRenter() {
+  return (process.env.MARKETPLACE_PROVIDER || 'nicehash').toLowerCase() === 'mrr'
+    ? require('../services/mrrRenter')
+    : require('../services/hashrateRenter');
+}
 
 const UPGRADE_TIERS = [
   { level: 1, cost: 0, hashrate: 10 },
@@ -23,7 +31,7 @@ function toSatPrecision(value) {
 const ORDER_SELECT = `
   SELECT h.order_id, h.status, h.nicehash_order_id, h.sandbox, h.usdc_cost,
          h.protocol_fee_usdc, h.btc_spent, h.btc_spot_price, h.price_feed,
-         h.price_is_usdc_pair, h.failure_reason, h.request_id,
+         h.price_is_usdc_pair, h.failure_reason, h.request_id, h.marketplace,
          r.level, r.virtual_hashrate
   FROM hashrate_orders h
   LEFT JOIN virtual_rigs r ON r.user_id = h.user_id AND r.target_pool = h.target_pool
@@ -35,6 +43,7 @@ function duplicateResponse(row) {
     duplicated: true,
     order_status: row.status,
     nicehash_order_id: row.nicehash_order_id || null,
+    marketplace: row.marketplace || null,
     btc_spent: Number(row.btc_spent),
     btc_spot_price: Number(row.btc_spot_price),
     price_feed: row.price_feed,
@@ -95,8 +104,8 @@ async function upgradeSelfMinedRig(req, res) {
     const orderInsert = await client.query(
       `INSERT INTO hashrate_orders
          (user_id, target_pool, request_id, usdc_cost, protocol_fee_usdc, btc_spent,
-          btc_spot_price, price_feed, price_is_usdc_pair, algorithm, status)
-       VALUES ($1, $2, $3, 0, 0, 0, 0, 'self-mined', false, 'RANDOMX', 'SELF_MINING')
+          btc_spot_price, price_feed, price_is_usdc_pair, algorithm, status, marketplace)
+       VALUES ($1, $2, $3, 0, 0, 0, 0, 'self-mined', false, 'RANDOMX', 'SELF_MINING', 'SELF-MINED')
        ON CONFLICT (request_id) DO NOTHING
        RETURNING order_id`,
       [userId, targetPool, requestId]
@@ -167,12 +176,20 @@ async function upgradeRig(req, res) {
     return res.status(400).json({ error: 'Invalid target pool' });
   }
 
-  // SAFETY RAIL: never move user funds unless a REAL NiceHash order can be placed.
-  if (process.env.NODE_ENV === 'production' && process.env.NICEHASH_LIVE_ORDERS !== '1') {
+  const renter = getRenter();
+  const { placeHashpowerOrder, getOrderStatus, POOL_ALGORITHM_MAP } = renter;
+  const providerName = renter.PROVIDER_NAME || 'NICEHASH';
+  const liveOrdersEnv = renter.LIVE_ORDERS_ENV || 'NICEHASH_LIVE_ORDERS';
+
+  // SAFETY RAIL: never move user funds unless a REAL marketplace order can be placed.
+  if (process.env.NODE_ENV === 'production' && process.env[liveOrdersEnv] !== '1') {
     return res.status(503).json({
       error:
-        'Live NiceHash orders are not enabled. Set NICEHASH_LIVE_ORDERS=1 after configuring ' +
-        'NICEHASH_API_KEY/NICEHASH_API_SECRET/NICEHASH_ORG_ID. No funds were moved.',
+        `Live ${providerName} orders are not enabled. Set ${liveOrdersEnv}=1 after configuring ` +
+        (providerName === 'MRR'
+          ? 'MRR_API_KEY/MRR_API_SECRET'
+          : 'NICEHASH_API_KEY/NICEHASH_API_SECRET/NICEHASH_ORG_ID') +
+        '. No funds were moved.',
     });
   }
 
@@ -247,8 +264,8 @@ async function upgradeRig(req, res) {
     const orderInsert = await client.query(
       `INSERT INTO hashrate_orders
          (user_id, target_pool, request_id, usdc_cost, protocol_fee_usdc, btc_spent,
-          btc_spot_price, price_feed, price_is_usdc_pair, algorithm, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'PENDING')
+          btc_spot_price, price_feed, price_is_usdc_pair, algorithm, status, marketplace)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'PENDING', $11)
        ON CONFLICT (request_id) DO NOTHING
        RETURNING order_id`,
       [
@@ -262,6 +279,7 @@ async function upgradeRig(req, res) {
         quote.feed,
         quote.isUsdcPair,
         POOL_ALGORITHM_MAP[targetPool],
+        providerName,
       ]
     );
     if (orderInsert.rowCount === 0) {
@@ -351,7 +369,7 @@ async function upgradeRig(req, res) {
       const st = await getOrderStatus(orderResult.orderId);
       niceHashStatus = st?.status || null;
     } catch (err) {
-      console.warn('Could not refresh NiceHash order status:', err.message);
+      console.warn('Could not refresh marketplace order status:', err.message);
     }
   }
 
@@ -366,6 +384,7 @@ async function upgradeRig(req, res) {
     price_feed: quote.feed,
     protocol_fee_usdc: protocolFeeUsdc,
     nicehash_order_id: orderResult.orderId || null,
+    marketplace: providerName,
     order_status: status,
     nicehash_status: niceHashStatus,
     sandbox: orderResult.mode !== 'live',

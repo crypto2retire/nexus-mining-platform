@@ -8,6 +8,15 @@ jest.mock('../services/hashrateRenter', () => ({
   placeHashpowerOrder: jest.fn(),
   getOrderStatus: jest.fn(),
   POOL_ALGORITHM_MAP: { ZCASH: 'ZHASH', KASPA: 'KHEAVYHASH', LTC_DOGE: 'SCRYPT' },
+  PROVIDER_NAME: 'NICEHASH',
+  LIVE_ORDERS_ENV: 'NICEHASH_LIVE_ORDERS',
+}));
+jest.mock('../services/mrrRenter', () => ({
+  placeHashpowerOrder: jest.fn(),
+  getOrderStatus: jest.fn(),
+  POOL_ALGORITHM_MAP: { ZCASH: 'ZHASH', KASPA: 'KHEAVYHASH', LTC_DOGE: 'SCRYPT' },
+  PROVIDER_NAME: 'MRR',
+  LIVE_ORDERS_ENV: 'MRR_LIVE_ORDERS',
 }));
 
 const { pool } = require('../config/db');
@@ -213,6 +222,50 @@ describe('upgradeRig — currency conversion + order loop', () => {
     expect(res.body.error).toMatch(/NICEHASH_LIVE_ORDERS/);
     expect(pool.connect).not.toHaveBeenCalled();
     expect(placeHashpowerOrder).not.toHaveBeenCalled();
+  });
+
+  test('MARKETPLACE_PROVIDER=mrr routes orders through the MRR renter (marketplace=MRR)', async () => {
+    process.env.MARKETPLACE_PROVIDER = 'mrr';
+    const mrrPlace = require('../services/mrrRenter').placeHashpowerOrder;
+    mrrPlace.mockResolvedValue({
+      success: true,
+      mode: 'sandbox',
+      orderId: 'sandbox-mrr-1',
+      sandbox: true,
+    });
+
+    const { client, queries } = makeClient();
+    pool.connect.mockResolvedValue(client);
+
+    const res = makeRes();
+    await upgradeRig(req({ request_id: 'req-mrr-1' }), res);
+
+    expect(res.statusCode).toBeNull(); // 200
+    expect(res.body.success).toBe(true);
+    expect(res.body.marketplace).toBe('MRR');
+    expect(res.body.order_status).toBe('SIMULATED');
+
+    // The NiceHash renter must NOT be involved.
+    expect(placeHashpowerOrder).not.toHaveBeenCalled();
+    expect(mrrPlace).toHaveBeenCalledTimes(1);
+    expect(mrrPlace).toHaveBeenCalledWith('ZCASH', 0.000475);
+
+    // Order row records the marketplace for the audit trail.
+    const orderInsert = queries.find((q) => q.sql.includes('INSERT INTO hashrate_orders'));
+    expect(orderInsert.params).toContain('MRR');
+  });
+
+  test('production with MARKETPLACE_PROVIDER=mrr refuses without MRR_LIVE_ORDERS', async () => {
+    process.env.MARKETPLACE_PROVIDER = 'mrr';
+    process.env.NODE_ENV = 'production';
+
+    const res = makeRes();
+    await upgradeRig(req(), res);
+
+    expect(res.statusCode).toBe(503);
+    expect(res.body.error).toMatch(/MRR_LIVE_ORDERS/);
+    expect(pool.connect).not.toHaveBeenCalled();
+    expect(require('../services/mrrRenter').placeHashpowerOrder).not.toHaveBeenCalled();
   });
 
   test('XMR self-mined upgrade: no USDC charge, no marketplace order, SELF_MINING status', async () => {

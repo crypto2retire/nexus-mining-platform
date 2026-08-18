@@ -76,8 +76,9 @@ export default function App() {
       if (!res.ok) throw new Error(result.error || 'Upgrade failed');
 
       const sandboxTag = result.sandbox ? ' [SANDBOX]' : '';
+      const marketplaceTag = result.marketplace ? `\nMarketplace: ${result.marketplace}` : '';
       const summary = result.btc_spent
-        ? `\n\nBTC spent: ${result.btc_spent}\nOrder ID: ${result.nicehash_order_id || 'n/a'}\nStatus: ${result.order_status || 'n/a'}${sandboxTag}`
+        ? `\n\nBTC spent: ${result.btc_spent}\nOrder ID: ${result.nicehash_order_id || 'n/a'}\nStatus: ${result.order_status || 'n/a'}${marketplaceTag}${sandboxTag}`
         : '';
       alert(`🎉 Upgrade successful! ${result.level} → hashrate ${result.hashrate} GH/s${summary}`);
       await fetchDashboard();

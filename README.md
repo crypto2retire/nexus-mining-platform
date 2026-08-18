@@ -2,6 +2,16 @@
 
 A Virtual Multi-Coin Cloud Mining App & Yield Dashboard built with **React (Vite)**, **Express.js**, and **PostgreSQL**, wired to the **NiceHash Hashrate Marketplace API** for real hash power purchases.
 
+## Marketplace providers
+
+Upgrade orders are placed through one provider at a time, chosen by `MARKETPLACE_PROVIDER`:
+
+- `nicehash` (default) — NiceHash API v2 (HMAC-SHA256). Requires `NICEHASH_API_KEY`/`NICEHASH_API_SECRET`/`NICEHASH_ORG_ID`/`NICEHASH_POOL_ID` + `NICEHASH_LIVE_ORDERS=1` in production; free testnet via `NICEHASH_ENV=test`. Marketplace minimum ≈ 0.001 BTC (~$64) for ZHASH/KHEAVYHASH/SCRYPT.
+- `mrr` — MiningRigRentals API v2 (HMAC-SHA1). Requires `MRR_API_KEY`/`MRR_API_SECRET` + `MRR_LIVE_ORDERS=1` in production (no testnet). Create one pool profile per algorithm in the MRR account and set `MRR_POOL_PROFILE_ZHASH`/`MRR_POOL_PROFILE_KHEAVYHASH`/`MRR_POOL_PROFILE_SCRYPT`. Minimum rentals are far lower (zhash ≈ $3.40, scrypt ≈ $8–10, kheavyhash ≈ $54 — verified 2026-08-18).
+
+Both providers share one safety model: in development orders are SIMULATED; in
+production, funds are never moved unless the provider is explicitly enabled.
+
 ## The Upgrade Loop (fully automated)
 
 ```
