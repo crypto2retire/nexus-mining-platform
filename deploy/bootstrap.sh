@@ -5,7 +5,7 @@
 set -euo pipefail
 
 APP_DIR=/opt/nexus-mining-platform
-BRANCH="${BRANCH:-feature/nicehash-live-loop}"
+BRANCH="${BRANCH:-main}"
 DOMAIN="${DOMAIN:-}"          # set to e.g. nexus.donelocal.io when DNS is pointed; empty = IP-only
 DB_PASSWORD="${DB_PASSWORD:?set DB_PASSWORD env}"
 API_SECRET="${API_SECRET:?set API_SECRET env}"
@@ -58,6 +58,11 @@ NICEHASH_POOL_ID=
 NICEHASH_LIVE_ORDERS=0
 NICEHASH_MARKET=EU
 PRICE_CACHE_TTL_MS=30000
+# Local Postgres on this host does not use SSL (would crash otherwise).
+DATABASE_SSL=false
+# Optional: point at a remote XMRig API to show live mining stats
+# (e.g. a Cloudflare quick tunnel to the operator's local miner).
+XMRIG_API_URL=
 EOF
 chmod 600 backend/.env
 
