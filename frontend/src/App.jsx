@@ -151,6 +151,25 @@ export default function App() {
     }
   };
 
+  // GoMiner opt-in: user OKs mining at a loss. The maintenance shortfall is
+  // charged to their USDC balance instead of pausing (auto-pause still guards
+  // them if the balance can't cover it).
+  const toggleLoss = async (pool, enabled) => {
+    try {
+      setError('');
+      const res = await fetch(`${API_BASE}/api/rigs/mine-at-loss`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ wallet, target_pool: pool, enabled }),
+      });
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error || 'Failed to update');
+      await fetchDashboard();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
   // Claim pending yield → USDC balance (live price, 5% fee already taken).
   const claim = async (pool) => {
     try {
@@ -319,6 +338,8 @@ export default function App() {
                   onClaim={claim}
                   onWithdraw={withdraw}
                   onReinvest={reinvest}
+                  mineAtLoss={data.rigs[pool.key]?.mine_at_loss === true}
+                  onToggleLoss={toggleLoss}
                 />
               ))}
             </section>

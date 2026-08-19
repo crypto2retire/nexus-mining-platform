@@ -45,7 +45,7 @@ async function getDashboard(req, res) {
         [userId]
       );
       const rigs = await client.query(
-        'SELECT rig_id, target_pool, virtual_hashrate, level, maintenance_status FROM virtual_rigs WHERE user_id = $1',
+        'SELECT rig_id, target_pool, virtual_hashrate, level, maintenance_status, mine_at_loss FROM virtual_rigs WHERE user_id = $1',
         [userId]
       );
       const rates = await client.query('SELECT pool, usdc_per_ghs_per_day FROM pool_maintenance_rates');
@@ -68,6 +68,7 @@ async function getDashboard(req, res) {
               virtual_hashrate: Number(rig.virtual_hashrate),
               level,
               maintenance_status: rig.maintenance_status,
+              mine_at_loss: rig.mine_at_loss === true,
             }
           : null;
         // Per-coin next upgrade price (entry points reflect real backing cost).

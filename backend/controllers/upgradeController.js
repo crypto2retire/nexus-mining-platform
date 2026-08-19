@@ -586,4 +586,41 @@ async function reinvestRig(req, res) {
   return upgradeRig(req, res);
 }
 
-module.exports = { upgradeRig, reinvestRig, POOL_TIERS, tiersFor, PROTOCOL_FEE_PCT };
+/**
+ * GoMiner opt-in (009): the owner explicitly OKs mining at a loss. When a
+ * payout can't cover maintenance, the shortfall is charged to the user's
+ * USDC balance instead of pausing the miner. If the balance can't cover it,
+ * the miner still pauses (auto-protection — the user can never go negative).
+ */
+async function setMineAtLoss(req, res) {
+  const walletAddress = (req.body.wallet || '').toLowerCase();
+  const targetPool = req.body.target_pool;
+  const enabled = req.body.enabled === true || req.body.enabled === 'true';
+
+  if (!walletAddress || !/^0x[a-f0-9]{40}$/i.test(walletAddress)) {
+    return res.status(400).json({ error: 'Valid wallet address is required' });
+  }
+  if (!['ZCASH', 'KASPA', 'LTC_DOGE', 'XMR'].includes(targetPool)) {
+    return res.status(400).json({ error: 'Invalid target pool' });
+  }
+
+  try {
+    const result = await pool.query(
+      `UPDATE virtual_rigs
+          SET mine_at_loss = $1, updated_at = CURRENT_TIMESTAMP
+        WHERE user_id = (SELECT user_id FROM users WHERE LOWER(wallet_address) = $2)
+          AND target_pool = $3
+        RETURNING rig_id, mine_at_loss`,
+      [enabled, walletAddress, targetPool]
+    );
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'No miner for this pool — buy one first' });
+    }
+    return res.json({ success: true, rig_id: result.rows[0].rig_id, mine_at_loss: result.rows[0].mine_at_loss });
+  } catch (err) {
+    console.error('setMineAtLoss error:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+}
+
+module.exports = { upgradeRig, reinvestRig, setMineAtLoss, POOL_TIERS, tiersFor, PROTOCOL_FEE_PCT };

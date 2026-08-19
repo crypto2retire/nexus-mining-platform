@@ -10,6 +10,7 @@ const COIN_NAMES = {
 export default function MiningRoomCard({
   title, pool, rig, pendingReward, upgradeCost,
   maintenanceRate, onUpgrade, onClaim, onWithdraw, onReinvest,
+  mineAtLoss, onToggleLoss,
 }) {
   const [animating, setAnimating] = useState(false);
   const level = Number(rig?.level) || 1;
@@ -55,10 +56,23 @@ export default function MiningRoomCard({
       </div>
       {dormant && (
         <div className="dormant-banner">
-          ⏸ Miner paused — payouts couldn't cover maintenance. Grow it (Upgrade / Reinvest) or
-          deposit USDC to resume.
+          ⏸ Miner paused — payouts couldn't cover maintenance. Grow it (Upgrade / Reinvest),
+          deposit USDC, or OK mining at a loss to continue.
         </div>
       )}
+      <div className="loss-toggle">
+        <label
+          className="loss-toggle-label"
+          title="When payouts can't cover maintenance, the shortfall is charged to your USDC balance instead of pausing. If your balance can't cover it, the miner still pauses — you can never go negative."
+        >
+          <input
+            type="checkbox"
+            checked={mineAtLoss === true}
+            onChange={(e) => onToggleLoss(pool, e.target.checked)}
+          />
+          ⚠ OK to mine at a loss
+        </label>
+      </div>
       <div className="card-actions">
         <button
           className={`btn-primary ${animating ? 'pulse' : ''}`}

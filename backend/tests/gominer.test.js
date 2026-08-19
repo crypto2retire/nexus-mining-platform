@@ -23,7 +23,7 @@ jest.mock('axios', () => ({ get: jest.fn() }));
 const { pool } = require('../config/db');
 const axios = require('axios');
 const { distributePayout } = require('../services/rewardDistributor');
-const { reinvestRig } = require('../controllers/upgradeController');
+const { reinvestRig, setMineAtLoss } = require('../controllers/upgradeController');
 const { getLiveBtcPrice } = require('../services/priceOracle');
 const { placeHashpowerOrder } = require('../services/hashrateRenter');
 
@@ -44,7 +44,7 @@ afterEach(() => {
 
 // ---- distributePayout: maintenance deduction + dormancy -------------------
 
-function distributionClient({ rate = 0.006, price = 0.05, hasHistory = true } = {}) {
+function distributionClient({ rate = 0.006, price = 0.05, hasHistory = true, mineAtLoss = false, usdcBalance = '10.0000' } = {}) {
   const now = Date.now();
   const start = new Date(now - 24 * 3600 * 1000); // 24h period
   const client = {
@@ -62,10 +62,17 @@ function distributionClient({ rate = 0.006, price = 0.05, hasHistory = true } = 
       if (sql.includes('SELECT usdc_per_ghs_per_day FROM pool_maintenance_rates')) {
         return { rowCount: 1, rows: [{ usdc_per_ghs_per_day: String(rate) }] };
       }
+      if (sql.includes('SELECT mine_at_loss FROM virtual_rigs')) {
+        return { rowCount: 1, rows: [{ mine_at_loss: mineAtLoss }] };
+      }
+      if (sql.includes('SELECT wallet_id, usdc_balance FROM user_wallets')) {
+        return { rowCount: 1, rows: [{ wallet_id: 'wallet-1', usdc_balance: String(usdcBalance) }] };
+      }
       if (sql.includes('INSERT INTO user_rewards_ledger')) return { rowCount: 1, rows: [] };
       if (sql.includes('INSERT INTO protocol_revenue_ledger')) return { rowCount: 1, rows: [] };
       if (sql.includes('INSERT INTO maintenance_fee_ledger')) return { rowCount: 1, rows: [] };
       if (sql.includes('UPDATE virtual_rigs')) return { rowCount: 1, rows: [] };
+      if (sql.includes('UPDATE user_wallets')) return { rowCount: 1, rows: [] };
       if (sql.includes('INSERT INTO rig_hashrate_history')) return { rowCount: 1, rows: [] };
       if (sql.includes('UPDATE real_pool_payouts')) return { rowCount: 1, rows: [] };
       throw new Error(`unexpected sql: ${sql}`);
@@ -142,6 +149,85 @@ describe('distributePayout — GoMiner maintenance', () => {
     const dormancy = client.query.mock.calls.find(([sql]) => sql.includes("maintenance_status = 'DORMANT'"));
     expect(dormancy).toBeFalsy();
     warn.mockRestore();
+  });
+});
+
+// ---- distributePayout: mine-at-loss opt-in (009) --------------------------
+
+describe('distributePayout — mine-at-loss opt-in (009)', () => {
+  test('OK at a loss + shortfall + sufficient USDC → stays ACTIVE, shortfall charged to balance', async () => {
+    const client = distributionClient({ rate: 0.006, price: 0.05, mineAtLoss: true, usdcBalance: '10.0000' });
+    // 25 GH/s × 1 day → maintenance 3 KAS; payout only 1 KAS → shortfall.
+    // remainingAfterFee = 0.95, deduct 0.95 → shortfallCoin = 2.05 KAS
+    // shortfallUsdc = 2.05 × $0.05 = $0.1025 → balance 10 − 0.1025 = 9.8975
+    await distributePayout('KASPA', 1, 1000);
+
+    // Explicit OK → the miner does NOT go dormant.
+    const dormancy = client.query.mock.calls.find(([sql]) => sql.includes("maintenance_status = 'DORMANT'"));
+    expect(dormancy).toBeFalsy();
+
+    // The shortfall came out of the user's USDC balance, not the platform.
+    const walletUpdate = client.query.mock.calls.find(([sql]) => sql.includes('UPDATE user_wallets SET usdc_balance'));
+    expect(walletUpdate).toBeTruthy();
+    expect(Number(walletUpdate[1][0])).toBeCloseTo(9.8975, 4);
+
+    // USDC-funded maintenance row booked with source='USDC'.
+    const usdcLedger = client.query.mock.calls.find(
+      ([sql, p]) => sql.includes('INSERT INTO maintenance_fee_ledger') && sql.includes("'USDC'")
+    );
+    expect(usdcLedger).toBeTruthy();
+    expect(Number(usdcLedger[1][5])).toBeCloseTo(0.1025, 6);
+  });
+
+  test('OK at a loss but balance canNOT cover shortfall → still DORMANT, no charge, never negative', async () => {
+    const client = distributionClient({ rate: 0.006, price: 0.05, mineAtLoss: true, usdcBalance: '0.0500' });
+    await distributePayout('KASPA', 1, 1000);
+
+    // shortfall $0.1025 > $0.05 balance → auto-pause protects the user.
+    const dormancy = client.query.mock.calls.find(([sql]) => sql.includes("maintenance_status = 'DORMANT'"));
+    expect(dormancy).toBeTruthy();
+
+    const walletUpdate = client.query.mock.calls.find(([sql]) => sql.includes('UPDATE user_wallets SET usdc_balance'));
+    expect(walletUpdate).toBeFalsy();
+
+    const usdcLedger = client.query.mock.calls.find(
+      ([sql, p]) => sql.includes('INSERT INTO maintenance_fee_ledger') && sql.includes("'USDC'")
+    );
+    expect(usdcLedger).toBeFalsy();
+  });
+});
+
+// ---- setMineAtLoss: OK-at-a-loss toggle endpoint ---------------------------
+
+describe('setMineAtLoss — OK-at-a-loss toggle', () => {
+  beforeEach(() => {
+    pool.query.mockReset();
+    pool.connect.mockReset();
+  });
+
+  test('enables mine-at-loss for the wallet pool', async () => {
+    pool.query.mockResolvedValueOnce({ rowCount: 1, rows: [{ rig_id: 'rig-1', mine_at_loss: true }] });
+    const res = makeRes();
+    await setMineAtLoss({ body: { wallet: WALLET, target_pool: 'KASPA', enabled: true } }, res);
+    expect(res.statusCode).toBeNull();
+    expect(res.body).toEqual({ success: true, rig_id: 'rig-1', mine_at_loss: true });
+  });
+
+  test('404 when the pool has no rig yet', async () => {
+    pool.query.mockResolvedValueOnce({ rowCount: 0, rows: [] });
+    const res = makeRes();
+    await setMineAtLoss({ body: { wallet: WALLET, target_pool: 'XMR', enabled: true } }, res);
+    expect(res.statusCode).toBe(404);
+  });
+
+  test('rejects invalid wallet and unknown pool', async () => {
+    const res = makeRes();
+    await setMineAtLoss({ body: { wallet: 'nope', target_pool: 'KASPA', enabled: true } }, res);
+    expect(res.statusCode).toBe(400);
+
+    const res2 = makeRes();
+    await setMineAtLoss({ body: { wallet: WALLET, target_pool: 'DOGE', enabled: true } }, res2);
+    expect(res2.statusCode).toBe(400);
   });
 });
 

@@ -4,6 +4,10 @@ const { contributionsForPool } = require('./rigHistory');
 
 const PROTOCOL_FEE_PCT = 0.05;
 
+function toSatPrecision(value) {
+  return parseFloat(Number(value).toFixed(8));
+}
+
 /**
  * GoMiner-style maintenance: buying a miner includes its hashrate forever,
  * but each payout first pays the miner's own running cost (maintenance +
@@ -41,6 +45,32 @@ async function maintenanceRateUsdcPerGhsDay(queryable, targetPool) {
     [targetPool]
   );
   return rows.length > 0 ? Number(rows[0].usdc_per_ghs_per_day) : 0;
+}
+
+/** Whether the owner explicitly OK'd mining at a loss (009_mine_at_loss). */
+async function mineAtLossEnabled(queryable, userId, targetPool) {
+  const { rows } = await queryable.query(
+    'SELECT mine_at_loss FROM virtual_rigs WHERE user_id = $1 AND target_pool = $2',
+    [userId, targetPool]
+  );
+  return rows.length > 0 && rows[0].mine_at_loss === true;
+}
+
+/** GoMiner auto-pause: miner stops contributing until grown or topped up. */
+async function goDormant(client, userId, targetPool, net, maintenanceUsdc) {
+  await client.query(
+    `UPDATE virtual_rigs
+        SET maintenance_status = 'DORMANT', dormant_at = CURRENT_TIMESTAMP
+      WHERE user_id = $1 AND target_pool = $2`,
+    [userId, targetPool]
+  );
+  // Zero the contribution going forward so a dormant miner stops
+  // earning shares (and stops being charged) until resumed.
+  await client.query(
+    'INSERT INTO rig_hashrate_history (user_id, target_pool, hashrate) VALUES ($1, $2, 0)',
+    [userId, targetPool]
+  );
+  console.log(`⏸ Miner ${userId}/${targetPool} went DORMANT — payout ${net.toFixed(8)} couldn't cover maintenance ${maintenanceUsdc.toFixed(8)} USDC`);
 }
 
 /**
@@ -148,19 +178,38 @@ async function distributePayout(targetPool, totalCryptoReward1, totalNetworkHash
 
       // GoMiner pause: payout couldn't cover the miner's running cost.
       if (shortfall && avgGhs > 0) {
-        await client.query(
-          `UPDATE virtual_rigs
-              SET maintenance_status = 'DORMANT', dormant_at = CURRENT_TIMESTAMP
-            WHERE user_id = $1 AND target_pool = $2`,
-          [c.user_id, targetPool]
-        );
-        // Zero the contribution going forward so a dormant miner stops
-        // earning shares (and stops being charged) until resumed.
-        await client.query(
-          'INSERT INTO rig_hashrate_history (user_id, target_pool, hashrate) VALUES ($1, $2, 0)',
-          [c.user_id, targetPool]
-        );
-        console.log(`⏸ Miner ${c.user_id}/${targetPool} went DORMANT — payout ${net.toFixed(8)} couldn't cover maintenance ${maintenanceUsdc.toFixed(8)} USDC`);
+        const shortfallCoin = maintenanceCoin - deductMaintenance;
+        const shortfallUsdc = shortfallCoin * (coinPrice || 0);
+
+        // Opt-in (009): the owner explicitly OK'd mining at a loss. The
+        // shortfall is charged to their USDC balance — the platform never
+        // fronts ongoing mining costs. If the balance can't cover it, the
+        // miner still goes DORMANT: users can never be driven negative.
+        const okLoss = await mineAtLossEnabled(client, c.user_id, targetPool);
+        if (okLoss && coinPrice && shortfallUsdc > 0) {
+          const walletResult = await client.query(
+            'SELECT wallet_id, usdc_balance FROM user_wallets WHERE user_id = $1 FOR UPDATE',
+            [c.user_id]
+          );
+          const wallet = walletResult.rows[0];
+          if (wallet && Number(wallet.usdc_balance) >= shortfallUsdc) {
+            await client.query(
+              'UPDATE user_wallets SET usdc_balance = $1, updated_at = CURRENT_TIMESTAMP WHERE wallet_id = $2',
+              [toSatPrecision(Number(wallet.usdc_balance) - shortfallUsdc), wallet.wallet_id]
+            );
+            // Audit trail: the USDC-funded portion of this maintenance charge.
+            await client.query(
+              `INSERT INTO maintenance_fee_ledger
+                (payout_id, user_id, target_pool, hashrate_ghs, days, amount_usdc, source)
+               VALUES ($1, $2, $3, $4, $5, $6, 'USDC')`,
+              [payoutId, c.user_id, targetPool, avgGhs, periodDays, shortfallUsdc]
+            );
+            console.log(`⚠️ Miner ${c.user_id}/${targetPool} OK'd loss — ${shortfallUsdc.toFixed(4)} USDC shortfall charged to balance`);
+            continue;
+          }
+        }
+
+        await goDormant(client, c.user_id, targetPool, net, maintenanceUsdc);
       }
     }
 

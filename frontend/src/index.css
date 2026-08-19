@@ -256,6 +256,27 @@ body {
   line-height: 1.4;
 }
 
+.loss-toggle {
+  margin: -0.35rem 0 0.9rem;
+}
+
+.loss-toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  color: #c9a15a;
+  cursor: pointer;
+  user-select: none;
+}
+
+.loss-toggle-label input[type='checkbox'] {
+  accent-color: #f59e0b;
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+}
+
 .card-stats {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));

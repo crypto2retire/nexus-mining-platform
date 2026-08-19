@@ -1,6 +1,6 @@
 const express = require('express');
 const { getDashboard } = require('../controllers/dashboardController');
-const { upgradeRig, reinvestRig } = require('../controllers/upgradeController');
+const { upgradeRig, reinvestRig, setMineAtLoss } = require('../controllers/upgradeController');
 const { handleRewardWebhook } = require('../services/rewardDistributor');
 const { getRewards, claimRewards, withdrawRewards, listWithdrawals, markWithdrawalPaid, rejectWithdrawal } = require('../controllers/rewardsController');
 const { getAdminStats } = require('../controllers/adminStatsController');
@@ -16,6 +16,8 @@ const router = express.Router();
 router.get('/dashboard', getDashboard);
 router.post('/rigs/upgrade', upgradeRig);
 router.post('/rigs/reinvest', reinvestRig);
+// GoMiner opt-in: OK mining at a loss (shortfall charged to USDC balance).
+router.post('/rigs/mine-at-loss', setMineAtLoss);
 router.post('/rewards/webhook', handleRewardWebhook);
 // Payout ledger + claim/withdraw (time-weighted contributions per payout).
 router.get('/rewards', getRewards);
