@@ -201,8 +201,14 @@ export default function App() {
           <>
             {connected && isEmptyAccount && (
               <div className="empty-wallet-banner">
-                Account connected ✓ — your balance is 0.0000 USDC. Deposit USDC on the Base network to
-                fund upgrades, then upgrade any mine to start earning.
+                Account connected ✓ — your balance is 0.0000 USDC. Fund your account by sending{' '}
+                <strong>USDC on the Base network</strong> to:
+                <div className="deposit-address" title="Platform USDC deposit address (copy all)">
+                  {data.deposit_address || 'Deposit address unavailable — contact support'}
+                </div>
+                <span className="fund-hint">
+                  Balance updates within ~1 minute of the transfer. Then upgrade any mine to start earning.
+                </span>
               </div>
             )}
 
