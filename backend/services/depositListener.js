@@ -1,7 +1,7 @@
 const { ethers } = require('ethers');
 const { pool } = require('../config/db');
 
-const USDC_CONTRACT = '0x833589fCD6eDb6E08f4c7C32D4f71b54bda02913';
+const USDC_CONTRACT = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 const USDC_ABI = [
   'event Transfer(address indexed from, address indexed to, uint256 value)',
 ];
