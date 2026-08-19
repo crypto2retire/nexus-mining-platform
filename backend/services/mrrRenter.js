@@ -163,6 +163,32 @@ function rpiOf(rig) {
   return Number.isFinite(n) ? n : null;
 }
 
+// Minimum advertised hashrate per algorithm (in the algo's natural unit) —
+// filters garbage listings like the 25 KH/s "scrypt CPU" rig that MRR itself
+// rejected (code 104: order value too low). Natural units:
+//   zhash = KH/s (real GPU rigs 100-400 KH/s)
+//   kheavyhash = TH/s (KS0+ 0.1-12.6 TH/s; CPU junk is far below)
+//   scrypt = GH/s (L3+/L9 0.5-17 GH/s; CPU listings are 25 KH/s = 0.000025 GH/s)
+const MIN_ADVERTISED = {
+  zhash: 20,
+  kheavyhash: 0.05,
+  scrypt: 0.5,
+};
+const HASH_TYPE_TO_BASE = {
+  zhash: { kh: 1, mh: 1e3, gh: 1e6, th: 1e9 },
+  kheavyhash: { kh: 1e-9, mh: 1e-6, gh: 1e-3, th: 1 },
+  scrypt: { kh: 1e-6, mh: 1e-3, gh: 1, th: 1e3 },
+};
+
+/** Advertised hashrate in the algo's natural unit; null when unknown. */
+function advertisedInBase(rig, algorithm) {
+  const adv = rig?.hashrate?.advertised;
+  if (!adv) return null;
+  const mult = HASH_TYPE_TO_BASE[algorithm]?.[String(adv.type || '').toLowerCase()];
+  if (mult === undefined) return null;
+  return Number(adv.hash || 0) * mult;
+}
+
 async function findAffordableRig(algorithm, budgetBtc) {
   const data = await makeMrrRequest('GET', '/rig', {
     type: algorithm,
@@ -183,6 +209,10 @@ async function findAffordableRig(algorithm, budgetBtc) {
     if (/RPI-100\+/i.test(name)) continue;
     // Untested rigs (rpi 'new') have no track record — skip by default.
     if (/^new$/i.test(String(rig?.rpi || '').trim())) continue;
+    // Garbage listings: advertised hashrate below the algo's real-minimum
+    // floor can never pay a share (e.g. a 25 KH/s "scrypt rig").
+    const baseHash = advertisedInBase(rig, algorithm);
+    if (baseHash !== null && baseHash < MIN_ADVERTISED[algorithm]) continue;
     const hourly = Number(rig?.price?.BTC?.hour || 0);
     if (!hourly) continue;
     const minHours = Number(rig?.minhours || 0);

@@ -449,6 +449,45 @@ async function upgradeRig(req, res) {
     ]
   );
 
+  // GoMiner backing ledger (010): a live MRR order is the rig's first real
+  // rental — record it so the rental scheduler knows this rig is backed and
+  // can later re-rent within the rig's collected maintenance. The buy-in
+  // (95% of the tier price, in USD) is the rig's initial fund.
+  if (providerName === 'MRR' && orderResult.mode === 'live' && orderResult.orderId) {
+    try {
+      const rigIdRes = await pool.query(
+        'SELECT rig_id FROM virtual_rigs WHERE user_id = $1 AND target_pool = $2',
+        [userId, targetPool]
+      );
+      const rigId = rigIdRes.rows[0]?.rig_id;
+      if (rigId) {
+        await pool.query(
+          `INSERT INTO rig_rentals
+            (user_id, rig_id, target_pool, mrr_rental_id, rig_name, rig_rpi,
+             cost_btc, cost_usd, length_hours, funded_from, status)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'POOL', 'ACTIVE')`,
+          [
+            userId,
+            rigId,
+            targetPool,
+            String(orderResult.orderId),
+            orderResult.rigName || null,
+            orderResult.rigRpi != null ? String(orderResult.rigRpi) : null,
+            spendBtcAmount,
+            netPurchaseUsdc,
+            orderResult.rigHours || null,
+          ]
+        );
+        console.log(`Rig ${rigId}/${targetPool} backed by MRR rental ${orderResult.orderId} ($${netPurchaseUsdc})`);
+      }
+    } catch (recordErr) {
+      // Recording failure must not break the upgrade response — the order is
+      // already placed and paid; the scheduler will still see the rental via
+      // the MRR list and can record it later if needed.
+      console.error('Could not record rig_rentals for order:', recordErr.message);
+    }
+  }
+
   let niceHashStatus = null;
   if (orderResult.orderId && orderResult.mode === 'live') {
     try {
