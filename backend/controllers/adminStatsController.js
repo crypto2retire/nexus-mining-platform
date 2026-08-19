@@ -38,16 +38,18 @@ async function getAdminStats(_req, res) {
                 COUNT(*) AS fee_count
            FROM protocol_revenue_ledger`
       ),
-      // 4. User rewards ledger totals per coin (by status).
+      // 4. User rewards ledger totals per coin (by status) — pool comes from
+      //    the payout row the ledger entry belongs to.
       pool.query(
-        `SELECT l.target_pool,
+        `SELECT p.target_pool,
                 COALESCE(SUM(l.calculated_reward_1), 0) AS total_earned_crypto,
                 COALESCE(SUM(l.calculated_reward_1) FILTER (WHERE l.status = 'UNCLAIMED'), 0) AS unclaimed_crypto,
                 COALESCE(SUM(l.calculated_reward_1) FILTER (WHERE l.status = 'CLAIMED'), 0) AS claimed_crypto,
                 COALESCE(SUM(l.calculated_reward_1) FILTER (WHERE l.status = 'PAID'), 0) AS paid_crypto
            FROM user_rewards_ledger l
-          GROUP BY l.target_pool
-          ORDER BY l.target_pool`
+           LEFT JOIN real_pool_payouts p USING (payout_id)
+          GROUP BY p.target_pool
+          ORDER BY p.target_pool`
       ),
       // 5. User base: how many wallets, total deposited.
       pool.query(
