@@ -1,5 +1,6 @@
 const { pool } = require('../config/db');
 const { getLiveBtcPrice } = require('../services/priceOracle');
+const { logRigChange } = require('../services/rigHistory');
 
 /**
  * Marketplace provider selection. Default = NiceHash. Set
@@ -131,6 +132,7 @@ async function upgradeSelfMinedRig(req, res) {
         [userId, targetPool, nextTier.hashrate, nextTier.level]
       );
     }
+    await logRigChange(client, userId, targetPool, nextTier.hashrate);
 
     await client.query('COMMIT');
   } catch (err) {
@@ -320,6 +322,7 @@ async function upgradeRig(req, res) {
         [userId, targetPool, nextTier.hashrate, nextTier.level]
       );
     }
+    await logRigChange(client, userId, targetPool, nextTier.hashrate);
 
     await client.query('COMMIT');
   } catch (err) {
@@ -356,11 +359,13 @@ async function upgradeRig(req, res) {
           'UPDATE virtual_rigs SET level = $1, virtual_hashrate = $2, updated_at = CURRENT_TIMESTAMP WHERE user_id = $3 AND target_pool = $4',
           [prevTier.level, prevTier.hashrate, userId, targetPool]
         );
+        await logRigChange(refundClient, userId, targetPool, prevTier.hashrate);
       } else {
         await refundClient.query(
           'DELETE FROM virtual_rigs WHERE user_id = $1 AND target_pool = $2',
           [userId, targetPool]
         );
+        await logRigChange(refundClient, userId, targetPool, 0);
       }
       await refundClient.query('COMMIT');
       console.error(`Order failed for request ${requestId}; ${nextTier.cost} USDC refunded and rig reverted for ${walletAddress}`);

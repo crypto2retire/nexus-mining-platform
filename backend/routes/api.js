@@ -2,6 +2,7 @@ const express = require('express');
 const { getDashboard } = require('../controllers/dashboardController');
 const { upgradeRig } = require('../controllers/upgradeController');
 const { handleRewardWebhook } = require('../services/rewardDistributor');
+const { getRewards, claimRewards, withdrawRewards } = require('../controllers/rewardsController');
 const { getMinerStatus } = require('../services/minerMonitor');
 const { startMiner, stopMiner, authorizeControl, switchCoin } = require('../services/minerControl');
 const { getPoolBalance } = require('../services/poolBalance');
@@ -13,6 +14,10 @@ const router = express.Router();
 router.get('/dashboard', getDashboard);
 router.post('/rigs/upgrade', upgradeRig);
 router.post('/rewards/webhook', handleRewardWebhook);
+// Payout ledger + claim/withdraw (time-weighted contributions per payout).
+router.get('/rewards', getRewards);
+router.post('/rewards/claim', claimRewards);
+router.post('/rewards/withdraw', withdrawRewards);
 router.get('/miner/status', async (_req, res) => {
   try {
     res.json(await getMinerStatus());

@@ -119,6 +119,28 @@ export default function App() {
     }
   };
 
+  // Claim pending yield → USDC balance (live price, 5% fee already taken).
+  const claim = async (pool) => {
+    try {
+      setError('');
+      const res = await fetch(`${API_BASE}/api/rewards/claim`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ wallet, target_pool: pool }),
+      });
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error || 'Claim failed');
+      if (result.claimed_usdc > 0) {
+        alert(`💰 Claimed ${result.claimed_usdc} USDC${result.pools?.length ? ` (${result.pools.join(', ')})` : ''} — added to your balance.`);
+      } else {
+        alert('Nothing to claim yet — yield accumulates after real pool payouts.');
+      }
+      await fetchDashboard();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
   useEffect(() => {
     if (wallet && VALID_WALLET_RE.test(wallet)) fetchDashboard(wallet);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -232,6 +254,7 @@ export default function App() {
                   rig={data.rigs[pool.key]}
                   pendingReward={animated[pool.key] || data.pending_rewards[pool.key] || 0}
                   onUpgrade={upgrade}
+                  onClaim={claim}
                 />
               ))}
             </section>

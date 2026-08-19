@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 
-export default function MiningRoomCard({ title, pool, rig, pendingReward, onUpgrade }) {
+export default function MiningRoomCard({ title, pool, rig, pendingReward, onUpgrade, onClaim }) {
   const [animating, setAnimating] = useState(false);
   const level = Number(rig?.level) || 1;
   const hashrate = Number(rig?.virtual_hashrate) || 0;
@@ -8,6 +8,12 @@ export default function MiningRoomCard({ title, pool, rig, pendingReward, onUpgr
   const handleUpgrade = () => {
     setAnimating(true);
     onUpgrade(pool);
+    setTimeout(() => setAnimating(false), 600);
+  };
+
+  const handleClaim = () => {
+    setAnimating(true);
+    onClaim(pool);
     setTimeout(() => setAnimating(false), 600);
   };
 
@@ -41,7 +47,7 @@ export default function MiningRoomCard({ title, pool, rig, pendingReward, onUpgr
         >
           Upgrade Rig
         </button>
-        <button className="btn-secondary" disabled={pendingReward <= 0}>
+        <button className="btn-secondary" disabled={pendingReward <= 0} onClick={handleClaim}>
           Claim Yield
         </button>
       </div>
