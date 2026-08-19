@@ -128,7 +128,18 @@ async function checkPool(poolKey) {
   const wallet = process.env[cfg.walletEnv];
   if (!wallet) return { pool: poolKey, status: 'no-wallet-configured' };
 
-  const balance = await fetchBalance(poolKey, wallet);
+  let balance;
+  try {
+    balance = await fetchBalance(poolKey, wallet);
+  } catch (err) {
+    // 404 = the pool has NO account for this wallet yet (zero shares ever
+    // recorded) — that is a genuine zero balance, not an API failure.
+    if (err.response?.status === 404) {
+      balance = 0;
+    } else {
+      throw err;
+    }
+  }
   const netHash = await fetchNetworkHashrate(poolKey);
 
   const row = await pool.query('SELECT last_balance FROM payout_watch WHERE pool = $1', [poolKey]);
