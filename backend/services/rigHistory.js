@@ -49,6 +49,35 @@ async function logRigChange(client, userId, targetPool, hashrate) {
 }
 
 /**
+ * GoMiner resume: wake a DORMANT miner back to its current level's hashrate
+ * (logs a hashrate change so time-weighted contribution resumes). Called when
+ * the owner upgrades the rig or tops up their balance — the "spend to grow"
+ * loop.
+ * @returns {Promise<number>} number of rigs resumed
+ */
+async function resumeDormantRigs(client, userId) {
+  const dormant = await client.query(
+    `SELECT rig_id, target_pool, virtual_hashrate
+       FROM virtual_rigs
+      WHERE user_id = $1 AND maintenance_status = 'DORMANT'`,
+    [userId]
+  );
+  for (const rig of dormant.rows) {
+    await client.query(
+      `UPDATE virtual_rigs
+          SET maintenance_status = 'ACTIVE', dormant_at = NULL, updated_at = CURRENT_TIMESTAMP
+        WHERE rig_id = $1`,
+      [rig.rig_id]
+    );
+    await logRigChange(client, userId, rig.target_pool, Number(rig.virtual_hashrate));
+  }
+  if (dormant.rowCount > 0) {
+    console.log(`▶ Resumed ${dormant.rowCount} dormant miner(s) for user ${userId}`);
+  }
+  return dormant.rowCount;
+}
+
+/**
  * Per-user contributions for a pool over [start, end], using history.
  * Users with a rig but no history (pre-logging) fall back to their current
  * hashrate × full period. Returns [{user_id, contribution}] with > 0 only.
@@ -89,4 +118,4 @@ async function contributionsForPool(client, targetPool, start, end) {
   return result;
 }
 
-module.exports = { computeContributions, logRigChange, contributionsForPool };
+module.exports = { computeContributions, logRigChange, contributionsForPool, resumeDormantRigs };

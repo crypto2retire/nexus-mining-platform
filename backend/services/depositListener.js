@@ -1,5 +1,6 @@
 const { ethers } = require('ethers');
 const { pool } = require('../config/db');
+const { resumeDormantRigs } = require('./rigHistory');
 
 const USDC_CONTRACT = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 const USDC_ABI = [
@@ -78,6 +79,9 @@ async function processDeposit(from, to, value, txHash) {
       'INSERT INTO deposit_history (user_id, tx_hash, amount_usdc) VALUES ($1, $2, $3)',
       [userId, txHash, amountUsdc]
     );
+    // Topping up is the GoMiner "pay the electricity bill" action — it wakes
+    // any dormant miners the user owns (spend-to-grow loop).
+    await resumeDormantRigs(client, userId);
 
     await client.query('COMMIT');
     console.log(`Deposit credited: ${amountUsdc} USDC from ${from} tx ${txHash}`);

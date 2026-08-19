@@ -1,6 +1,7 @@
 const { pool } = require('../config/db');
 const { getLiveBtcPrice } = require('../services/priceOracle');
-const { logRigChange } = require('../services/rigHistory');
+const { logRigChange, resumeDormantRigs } = require('../services/rigHistory');
+const { fetchCoinUsdPrice, claimPoolRewardsInTx } = require('./rewardsController');
 
 /**
  * Marketplace provider selection. Default = NiceHash. Set
@@ -160,16 +161,17 @@ async function upgradeSelfMinedRig(req, res) {
 
     if (rig) {
       await client.query(
-        'UPDATE virtual_rigs SET level = $1, virtual_hashrate = $2, updated_at = CURRENT_TIMESTAMP WHERE rig_id = $3',
-        [nextTier.level, nextTier.hashrate, rig.rig_id]
+        'UPDATE virtual_rigs SET level = $1, virtual_hashrate = $2, maintenance_status = $3, updated_at = CURRENT_TIMESTAMP WHERE rig_id = $4',
+        [nextTier.level, nextTier.hashrate, 'ACTIVE', rig.rig_id]
       );
     } else {
       await client.query(
-        'INSERT INTO virtual_rigs (user_id, target_pool, virtual_hashrate, level) VALUES ($1, $2, $3, $4)',
-        [userId, targetPool, nextTier.hashrate, nextTier.level]
+        'INSERT INTO virtual_rigs (user_id, target_pool, virtual_hashrate, level, maintenance_status) VALUES ($1, $2, $3, $4, $5)',
+        [userId, targetPool, nextTier.hashrate, nextTier.level, 'ACTIVE']
       );
     }
     await logRigChange(client, userId, targetPool, nextTier.hashrate);
+    await resumeDormantRigs(client, userId);
 
     await client.query('COMMIT');
   } catch (err) {
@@ -342,24 +344,29 @@ async function upgradeRig(req, res) {
     );
 
     // Revenue ledger books ONLY the 5% protocol fee. The other 95% is a
-    // pass-through to the NiceHash marketplace, NOT platform revenue.
+    // pass-through to the marketplace, NOT platform revenue. The row is
+    // linked to this order so a refund can reverse exactly the fee.
     await client.query(
-      'INSERT INTO protocol_revenue_ledger (source_user_id, amount_usdc, transaction_type) VALUES ($1, $2, $3)',
-      [userId, protocolFeeUsdc, 'RIG_UPGRADE']
+      `INSERT INTO protocol_revenue_ledger (source_user_id, amount_usdc, transaction_type, order_id)
+       VALUES ($1, $2, $3, $4)`,
+      [userId, protocolFeeUsdc, 'RIG_UPGRADE', orderRecordId]
     );
 
     if (rig) {
       await client.query(
-        'UPDATE virtual_rigs SET level = $1, virtual_hashrate = $2, updated_at = CURRENT_TIMESTAMP WHERE rig_id = $3',
-        [nextTier.level, nextTier.hashrate, rig.rig_id]
+        'UPDATE virtual_rigs SET level = $1, virtual_hashrate = $2, maintenance_status = $3, updated_at = CURRENT_TIMESTAMP WHERE rig_id = $4',
+        [nextTier.level, nextTier.hashrate, 'ACTIVE', rig.rig_id]
       );
     } else {
       await client.query(
-        'INSERT INTO virtual_rigs (user_id, target_pool, virtual_hashrate, level) VALUES ($1, $2, $3, $4)',
-        [userId, targetPool, nextTier.hashrate, nextTier.level]
+        'INSERT INTO virtual_rigs (user_id, target_pool, virtual_hashrate, level, maintenance_status) VALUES ($1, $2, $3, $4, $5)',
+        [userId, targetPool, nextTier.hashrate, nextTier.level, 'ACTIVE']
       );
     }
     await logRigChange(client, userId, targetPool, nextTier.hashrate);
+    // Buying hashpower is the GoMiner "grow" action — it wakes any dormant
+    // miners the user owns in OTHER pools too (spend-to-grow loop).
+    await resumeDormantRigs(client, userId);
 
     await client.query('COMMIT');
   } catch (err) {
@@ -388,6 +395,13 @@ async function upgradeRig(req, res) {
       await refundClient.query(
         `UPDATE hashrate_orders SET status = 'REFUNDED', failure_reason = $1, updated_at = CURRENT_TIMESTAMP WHERE order_id = $2`,
         [orderResult.error, orderRecordId]
+      );
+      // Reverse the fee booked for this order — it was linked by order_id so
+      // we can remove exactly the right row (previously the fee row survived
+      // a refund as phantom revenue).
+      await refundClient.query(
+        'DELETE FROM protocol_revenue_ledger WHERE order_id = $1',
+        [orderRecordId]
       );
       // Revert the rig to its pre-upgrade level (or delete if it was just created).
       const prevTier = tiersFor(targetPool).find((t) => t.level === nextTier.level - 1) || null;
@@ -464,7 +478,112 @@ async function upgradeRig(req, res) {
     nicehash_status: niceHashStatus,
     sandbox: orderResult.mode !== 'live',
     request_id: requestId,
+    reinvested_usdc: req.reinvestedUsdc || 0,
   });
 }
 
-module.exports = { upgradeRig, POOL_TIERS, tiersFor, PROTOCOL_FEE_PCT };
+/**
+ * GoMiner reinvest: use the user's MINED TOKENS (unclaimed rewards in this
+ * pool) to pay for the next rig upgrade — no USDC deposit needed. The mined
+ * tokens are claimed to the user's USDC balance at the live coin price, then
+ * the standard upgrade flow runs (5% fee, real marketplace order, refund +
+ * rig revert on failure). If the upgrade order fails, the user keeps the
+ * claimed balance — nothing is lost, and the request_id stays idempotent.
+ */
+async function reinvestRig(req, res) {
+  const walletAddress = (req.body.wallet || '').toLowerCase();
+  const targetPool = req.body.target_pool;
+  const requestId = String(req.body.request_id || '').trim();
+
+  if (!walletAddress || !/^0x[a-f0-9]{40}$/i.test(walletAddress)) {
+    return res.status(400).json({ error: 'Valid wallet address is required' });
+  }
+  if (!requestId || requestId.length > 64) {
+    return res.status(400).json({ error: 'request_id is required (1-64 chars) for idempotent upgrades' });
+  }
+
+  // XMR upgrades are SELF-MINED and free — nothing to reinvest.
+  if (targetPool === 'XMR') {
+    return upgradeRig(req, res);
+  }
+  if (!['ZCASH', 'KASPA', 'LTC_DOGE'].includes(targetPool)) {
+    return res.status(400).json({ error: 'Invalid target pool' });
+  }
+
+  // Idempotency FIRST: a retry of a completed reinvest must return the stored
+  // order result, never claim rewards again.
+  const existing = await pool.query(`${ORDER_SELECT} WHERE h.request_id = $1`, [requestId]);
+  if (existing.rowCount > 0) {
+    return res.json(duplicateResponse(existing.rows[0]));
+  }
+
+  // What does the next tier cost, and what are the mined tokens worth?
+  const client = await pool.connect();
+  let userId = null;
+  let walletId = null;
+  let claimedUsdc = 0;
+  try {
+    await client.query('BEGIN');
+
+    const userResult = await client.query(
+      'SELECT user_id FROM users WHERE LOWER(wallet_address) = $1 FOR UPDATE',
+      [walletAddress]
+    );
+    if (userResult.rowCount === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'User not found' });
+    }
+    userId = userResult.rows[0].user_id;
+
+    const walletResult = await client.query(
+      'SELECT wallet_id FROM user_wallets WHERE user_id = $1 FOR UPDATE',
+      [userId]
+    );
+    if (walletResult.rowCount === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Wallet not found' });
+    }
+    walletId = walletResult.rows[0].wallet_id;
+
+    const rigResult = await client.query(
+      'SELECT level FROM virtual_rigs WHERE user_id = $1 AND target_pool = $2 FOR UPDATE',
+      [userId, targetPool]
+    );
+    const currentLevel = rigResult.rowCount > 0 ? Number(rigResult.rows[0].level) : 1;
+    const nextTier = tiersFor(targetPool).find((t) => t.level === currentLevel + 1);
+    if (!nextTier) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Already at max level' });
+    }
+
+    // Value of the user's mined tokens for THIS pool at the live coin price.
+    let coinPrice;
+    try {
+      coinPrice = await fetchCoinUsdPrice(targetPool);
+    } catch (err) {
+      await client.query('ROLLBACK');
+      return res.status(502).json({ error: `Price oracle unavailable: ${err.message}` });
+    }
+
+    claimedUsdc = await claimPoolRewardsInTx(client, userId, walletId, targetPool, coinPrice);
+    await client.query('COMMIT');
+
+    if (claimedUsdc <= 0) {
+      return res.status(400).json({
+        error: `No mined ${targetPool} tokens to reinvest yet — yield accumulates after real pool payouts.`,
+      });
+    }
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Reinvest claim error:', err);
+    return res.status(500).json({ error: err.message || 'Internal server error' });
+  } finally {
+    client.release();
+  }
+
+  // Tell the upgrade flow how much mined-token value funded it (display only).
+  req.reinvestedUsdc = claimedUsdc;
+  return upgradeRig(req, res);
+}
+
+module.exports = { upgradeRig, reinvestRig, POOL_TIERS, tiersFor, PROTOCOL_FEE_PCT };

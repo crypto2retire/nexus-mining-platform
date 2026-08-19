@@ -47,15 +47,22 @@ export default function GetStarted({ depositAddress }) {
               Your balance appears on the dashboard within a minute of the transfer.
             </li>
             <li>
-              <strong>Upgrade a mine.</strong> Click <strong>Upgrade Rig</strong> on any room card.
-              The first paid tier is $50 — your account gets real hashrate and a share of that
-              pool's real mining rewards. The <strong>Monero (XMR)</strong> room is powered by the
-              platform's own miner, so it's the free way to get started.
+              <strong>Buy a miner.</strong> Click <strong>Upgrade Rig</strong> on any room card. You
+              own the miner and its hashrate permanently. Entry prices follow real mining costs —
+              Kaspa and Monero start at <strong>$5</strong>, Zcash at <strong>$20</strong>,
+              Litecoin at <strong>$50</strong>. The <strong>Monero (XMR)</strong> room is powered by
+              the platform's own miner, so it's the free way to get started.
             </li>
             <li>
-              <strong>Earn.</strong> Your share of each pool's rewards accumulates as{' '}
-              <em>pending yield</em> on the room card. Claim it anytime with the{' '}
-              <strong>Claim Yield</strong> button.
+              <strong>Earn — after maintenance.</strong> Like a real miner, your rig pays its own
+              running cost (electricity + upkeep, a small USDC fee per GH/s per day) out of every
+              payout. The rest is your yield. If a payout can't cover the miner's upkeep it goes
+              dormant until you grow it or deposit — so bigger miners earn faster.
+            </li>
+            <li>
+              <strong>Reinvest to grow.</strong> Use the <strong>Reinvest Yield → Upgrade</strong>{' '}
+              button to put your mined tokens straight into the next upgrade — no new USDC needed.
+              Claim anytime with <strong>Claim Yield</strong>, or withdraw the mined token itself.
             </li>
           </ol>
 

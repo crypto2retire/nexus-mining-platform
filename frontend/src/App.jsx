@@ -120,6 +120,37 @@ export default function App() {
     }
   };
 
+  // GoMiner reinvest: mined tokens fund the next upgrade directly — no USDC
+  // deposit step. Same idempotent upgrade path behind the scenes.
+  const reinvest = async (pool) => {
+    try {
+      setError('');
+      const requestId = crypto.randomUUID
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const res = await fetch(`${API_BASE}/api/rigs/reinvest`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ wallet, target_pool: pool, request_id: requestId }),
+      });
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error || 'Reinvest failed');
+
+      const sandboxTag = result.sandbox ? ' [SANDBOX]' : '';
+      const marketplaceTag = result.marketplace ? `\nMarketplace: ${result.marketplace}` : '';
+      const summary = result.btc_spent
+        ? `\n\nBTC spent: ${result.btc_spent}\nOrder ID: ${result.nicehash_order_id || 'n/a'}\nStatus: ${result.order_status || 'n/a'}${marketplaceTag}${sandboxTag}`
+        : '';
+      alert(
+        `🔄 Reinvested ${Number(result.reinvested_usdc || 0).toFixed(2)} USDC of mined tokens — ` +
+        `rig upgraded to level ${result.level} (${result.hashrate} GH/s)${summary}`
+      );
+      await fetchDashboard();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
   // Claim pending yield → USDC balance (live price, 5% fee already taken).
   const claim = async (pool) => {
     try {
@@ -283,9 +314,11 @@ export default function App() {
                   rig={data.rigs[pool.key]}
                   pendingReward={animated[pool.key] || data.pending_rewards[pool.key] || 0}
                   upgradeCost={data.upgrade_cost?.[pool.key] ?? null}
+                  maintenanceRate={data.maintenance_rate?.[pool.key] ?? 0}
                   onUpgrade={upgrade}
                   onClaim={claim}
                   onWithdraw={withdraw}
+                  onReinvest={reinvest}
                 />
               ))}
             </section>

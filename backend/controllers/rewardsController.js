@@ -2,6 +2,42 @@ const axios = require('axios');
 const { pool } = require('../config/db');
 
 /**
+ * Shared helper: convert a user's UNCLAIMED rewards for ONE pool to USDC
+ * balance at the given live price. Must be called inside an open transaction
+ * with the user + wallet rows locked.
+ * @returns {Promise<number>} total USDC credited
+ */
+async function claimPoolRewardsInTx(client, userId, walletId, targetPool, price) {
+  const ledgerResult = await client.query(
+    `SELECT l.ledger_id, l.calculated_reward_1
+       FROM user_rewards_ledger l
+       JOIN real_pool_payouts p USING (payout_id)
+      WHERE l.user_id = $1 AND l.status = 'UNCLAIMED' AND l.withdrawal_id IS NULL
+        AND p.target_pool = $2
+      FOR UPDATE OF l`,
+    [userId, targetPool]
+  );
+  if (ledgerResult.rowCount === 0) return 0;
+
+  let totalUsdc = 0;
+  for (const row of ledgerResult.rows) {
+    const usdc = round4(Number(row.calculated_reward_1) * price);
+    totalUsdc = round4(totalUsdc + usdc);
+    await client.query(
+      `UPDATE user_rewards_ledger
+          SET status = 'CLAIMED', claimed_usdc = $2, claimed_at = CURRENT_TIMESTAMP
+        WHERE ledger_id = $1`,
+      [row.ledger_id, usdc]
+    );
+  }
+  await client.query(
+    'UPDATE user_wallets SET usdc_balance = usdc_balance + $1, updated_at = CURRENT_TIMESTAMP WHERE wallet_id = $2',
+    [totalUsdc, walletId]
+  );
+  return totalUsdc;
+}
+
+/**
  * Rewards / payout controller.
  *
  * - GET  /api/rewards            — per-payout ledger with contribution & share
@@ -452,6 +488,7 @@ module.exports = {
   listWithdrawals,
   markWithdrawalPaid,
   rejectWithdrawal,
+  claimPoolRewardsInTx,
   fetchCoinUsdPrice,
   POOL_COINGECKO,
   ADDRESS_RULES,

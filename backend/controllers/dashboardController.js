@@ -45,13 +45,18 @@ async function getDashboard(req, res) {
         [userId]
       );
       const rigs = await client.query(
-        'SELECT rig_id, target_pool, virtual_hashrate, level FROM virtual_rigs WHERE user_id = $1',
+        'SELECT rig_id, target_pool, virtual_hashrate, level, maintenance_status FROM virtual_rigs WHERE user_id = $1',
         [userId]
       );
+      const rates = await client.query('SELECT pool, usdc_per_ghs_per_day FROM pool_maintenance_rates');
 
       const pools = ['ZCASH', 'KASPA', 'LTC_DOGE', 'XMR'];
       const rigsByPool = {};
       const upgradeCostByPool = {};
+      const maintenanceRateByPool = {};
+      for (const row of rates.rows) {
+        maintenanceRateByPool[row.pool] = Number(row.usdc_per_ghs_per_day);
+      }
       for (const pool of pools) {
         const rig = rigs.rows.find(r => r.target_pool === pool);
         const level = rig ? Number(rig.level) : 1;
@@ -62,6 +67,7 @@ async function getDashboard(req, res) {
               target_pool: rig.target_pool,
               virtual_hashrate: Number(rig.virtual_hashrate),
               level,
+              maintenance_status: rig.maintenance_status,
             }
           : null;
         // Per-coin next upgrade price (entry points reflect real backing cost).
@@ -91,6 +97,7 @@ async function getDashboard(req, res) {
         usdc_balance: Number(wallet.rows[0]?.usdc_balance || 0),
         rigs: rigsByPool,
         upgrade_cost: upgradeCostByPool,
+        maintenance_rate: maintenanceRateByPool,
         pending_rewards: pendingByPool,
         is_admin: isAdminWallet(walletAddress),
         // Never expose a missing/zero-address treasury — the zero address is a
