@@ -57,7 +57,7 @@ async function getRewards(req, res) {
     const { rows } = await pool.query(
       `SELECT l.ledger_id, l.calculated_reward_1, l.protocol_fee_taken, l.status,
               l.weighted_contribution, l.total_contribution, l.share_pct,
-              l.claimed_usdc, l.claimed_at,
+              l.claimed_usdc, l.claimed_at, l.withdrawal_id,
               p.target_pool, p.total_crypto_reward_1, p.period_start, p.period_end,
               p.payout_timestamp
          FROM user_rewards_ledger l
@@ -73,6 +73,7 @@ async function getRewards(req, res) {
       reward_coin: Number(r.calculated_reward_1),
       fee_coin: Number(r.protocol_fee_taken),
       status: r.status,
+      withdrawal_id: r.withdrawal_id || null,
       weighted_contribution: Number(r.weighted_contribution),
       total_contribution: Number(r.total_contribution),
       share_pct: Number(r.share_pct),
@@ -87,11 +88,18 @@ async function getRewards(req, res) {
     }));
 
     const pendingByPool = {};
+    const withdrawableByPool = {};
     let pendingUsdc = 0;
     let claimedUsdc = 0;
     for (const r of rewards) {
       if (r.status === 'UNCLAIMED') {
-        pendingByPool[r.target_pool] = round4((pendingByPool[r.target_pool] || 0) + r.reward_coin);
+        if (r.withdrawal_id) {
+          // Held by a PENDING withdrawal request — not claimable, not
+          // withdrawable again.
+        } else {
+          pendingByPool[r.target_pool] = round4((pendingByPool[r.target_pool] || 0) + r.reward_coin);
+          withdrawableByPool[r.target_pool] = round4((withdrawableByPool[r.target_pool] || 0) + r.reward_coin);
+        }
       } else if (r.status === 'CLAIMED') {
         claimedUsdc = round4(claimedUsdc + r.claimed_usdc);
       }
@@ -103,6 +111,9 @@ async function getRewards(req, res) {
         pending_by_pool: pendingByPool,
         claimed_usdc: claimedUsdc,
       },
+      // What each pool still owes in mined tokens (withdrawable) vs held by
+      // pending withdrawal requests.
+      withdrawable_by_pool: withdrawableByPool,
     });
   } catch (err) {
     console.error('Get rewards error:', err);
@@ -139,7 +150,7 @@ async function claimRewards(req, res) {
     `SELECT DISTINCT p.target_pool
        FROM user_rewards_ledger l
        JOIN real_pool_payouts p USING (payout_id)
-      WHERE l.user_id = $1 AND l.status = 'UNCLAIMED' ${poolFilter}`,
+      WHERE l.user_id = $1 AND l.status = 'UNCLAIMED' AND l.withdrawal_id IS NULL ${poolFilter}`,
     poolParams
   );
   const pendingPools = pendingPoolsResult.rows.map((r) => r.target_pool);
@@ -186,7 +197,7 @@ async function claimRewards(req, res) {
       `SELECT l.ledger_id, l.calculated_reward_1, p.target_pool
          FROM user_rewards_ledger l
          JOIN real_pool_payouts p USING (payout_id)
-        WHERE l.user_id = $1 AND l.status = 'UNCLAIMED' ${ledgerFilter}
+        WHERE l.user_id = $1 AND l.status = 'UNCLAIMED' AND l.withdrawal_id IS NULL ${ledgerFilter}
         FOR UPDATE OF l`,
       params
     );
@@ -237,20 +248,41 @@ async function claimRewards(req, res) {
   }
 }
 
-/** POST /api/rewards/withdraw — request cash-out of USDC balance. */
+/**
+ * POST /api/rewards/withdraw — request cash-out of UNCLAIMED rewards in the
+ * mined token the user earned (e.g. withdraw ZEC for ZEC rewards). Creates a
+ * PENDING request and holds the matching ledger rows so they cannot be
+ * claimed or withdrawn again. The operator sends the coin from the platform
+ * wallet and marks the request PAID.
+ */
+const ADDRESS_RULES = {
+  ZCASH: /^t1[a-zA-Z0-9]{33}$/,
+  KASPA: /^kaspa:[a-z0-9]{60,64}$/i,
+  LTC_DOGE: /^(ltc1[a-z0-9]{38}|[LM3][a-zA-Z0-9]{33})$/i,
+  XMR: /^4[0-9AB][1-9A-HJ-NP-Za-km-z]{93}$/,
+};
+
 async function withdrawRewards(req, res) {
   const walletAddress = (req.body.wallet || '').toLowerCase();
-  const amount = Number(req.body.amount_usdc);
-  const toAddress = (req.body.to_address || '').toLowerCase();
+  const targetPool = req.body.target_pool;
+  const amountCoin = Number(req.body.amount_coin);
+  const toAddress = String(req.body.to_address || '').trim();
 
   if (!validWallet(walletAddress)) {
     return res.status(400).json({ error: 'Valid wallet address is required' });
   }
-  if (!validWallet(toAddress)) {
-    return res.status(400).json({ error: 'Valid destination address is required (0x + 40 characters)' });
+  if (!ADDRESS_RULES[targetPool]) {
+    return res.status(400).json({ error: 'Invalid target_pool' });
   }
-  if (!(amount > 0)) {
-    return res.status(400).json({ error: 'amount_usdc must be positive' });
+  if (!ADDRESS_RULES[targetPool].test(toAddress)) {
+    return res.status(400).json({
+      error: `Invalid ${targetPool} destination address (e.g. ${
+        targetPool === 'ZCASH' ? 't1...' : targetPool === 'KASPA' ? 'kaspa:...' : targetPool === 'LTC_DOGE' ? 'ltc1...' : '4...'
+      })`,
+    });
+  }
+  if (!(amountCoin > 0)) {
+    return res.status(400).json({ error: 'amount_coin must be positive' });
   }
 
   const client = await pool.connect();
@@ -267,39 +299,55 @@ async function withdrawRewards(req, res) {
     }
     const userId = userResult.rows[0].user_id;
 
-    const walletResult = await client.query(
-      'SELECT wallet_id, usdc_balance FROM user_wallets WHERE user_id = $1 FOR UPDATE',
-      [userId]
+    // Available rewards for this pool = UNCLAIMED and not already held by a
+    // withdrawal request. Lock them so a concurrent request can't over-hold.
+    const available = await client.query(
+      `SELECT l.ledger_id, l.calculated_reward_1
+         FROM user_rewards_ledger l
+         JOIN real_pool_payouts p USING (payout_id)
+        WHERE l.user_id = $1 AND p.target_pool = $2
+          AND l.status = 'UNCLAIMED' AND l.withdrawal_id IS NULL
+        ORDER BY p.payout_timestamp
+        FOR UPDATE OF l`,
+      [userId, targetPool]
     );
-    if (walletResult.rowCount === 0) {
+    const totalAvailable = available.rows.reduce((s, r) => s + Number(r.calculated_reward_1), 0);
+    if (totalAvailable < amountCoin) {
       await client.query('ROLLBACK');
-      return res.status(404).json({ error: 'Wallet not found' });
-    }
-    const walletId = walletResult.rows[0].wallet_id;
-    const balance = Number(walletResult.rows[0].usdc_balance);
-    if (balance < amount) {
-      await client.query('ROLLBACK');
-      return res.status(400).json({ error: `Insufficient USDC balance (have ${balance.toFixed(4)}, need ${amount.toFixed(4)})` });
+      return res.status(400).json({
+        error: `Insufficient unclaimed ${targetPool} rewards (have ${totalAvailable.toFixed(8)}, need ${amountCoin.toFixed(8)})`,
+      });
     }
 
-    await client.query(
-      'UPDATE user_wallets SET usdc_balance = usdc_balance - $1, updated_at = CURRENT_TIMESTAMP WHERE wallet_id = $2',
-      [amount, walletId]
-    );
     const reqResult = await client.query(
-      `INSERT INTO withdrawal_requests (user_id, amount_usdc, to_address, status)
-       VALUES ($1, $2, $3, 'PENDING')
+      `INSERT INTO withdrawal_requests (user_id, target_pool, amount_coin, to_address, status)
+       VALUES ($1, $2, $3, $4, 'PENDING')
        RETURNING withdrawal_id`,
-      [userId, amount, toAddress]
+      [userId, targetPool, amountCoin, toAddress]
     );
+    const withdrawalId = reqResult.rows[0].withdrawal_id;
+
+    // Hold ledger rows FIFO until the requested amount is covered.
+    let remaining = amountCoin;
+    for (const row of available.rows) {
+      if (remaining <= 0) break;
+      const take = Math.min(Number(row.calculated_reward_1), remaining);
+      remaining = Math.round((remaining - take) * 1e8) / 1e8;
+      await client.query(
+        'UPDATE user_rewards_ledger SET withdrawal_id = $1 WHERE ledger_id = $2',
+        [withdrawalId, row.ledger_id]
+      );
+    }
 
     await client.query('COMMIT');
     return res.json({
       success: true,
-      withdrawal_id: reqResult.rows[0].withdrawal_id,
-      amount_usdc: amount,
+      withdrawal_id: withdrawalId,
+      target_pool: targetPool,
+      amount_coin: amountCoin,
+      to_address: toAddress,
       status: 'PENDING',
-      message: 'Withdrawal request received. The platform operator will process it from the treasury.',
+      message: `Withdrawal request received. The operator will send ${amountCoin} ${targetPool} to your address and mark it PAID.`,
     });
   } catch (err) {
     await client.query('ROLLBACK');
@@ -310,4 +358,101 @@ async function withdrawRewards(req, res) {
   }
 }
 
-module.exports = { getRewards, claimRewards, withdrawRewards, fetchCoinUsdPrice, POOL_COINGECKO };
+/** GET /api/rewards/withdrawals — operator view: all requests. */
+async function listWithdrawals(_req, res) {
+  try {
+    const { rows } = await pool.query(
+      `SELECT w.withdrawal_id, w.user_id, u.wallet_address, w.target_pool,
+              w.amount_coin, w.to_address, w.status, w.tx_hash, w.requested_at, w.processed_at
+         FROM withdrawal_requests w
+         LEFT JOIN users u USING (user_id)
+        ORDER BY w.requested_at DESC
+        LIMIT 200`
+    );
+    return res.json({ withdrawals: rows });
+  } catch (err) {
+    console.error('List withdrawals error:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+}
+
+/** POST /api/rewards/withdrawals/:id/paid — operator marks a request paid. */
+async function markWithdrawalPaid(req, res) {
+  const id = req.params.id;
+  const txHash = String(req.body.tx_hash || '').trim();
+  if (!txHash) {
+    return res.status(400).json({ error: 'tx_hash is required' });
+  }
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await client.query(
+      `UPDATE withdrawal_requests
+          SET status = 'PAID', tx_hash = $2, processed_at = CURRENT_TIMESTAMP
+        WHERE withdrawal_id = $1 AND status = 'PENDING'
+        RETURNING withdrawal_id`,
+      [id, txHash]
+    );
+    if (result.rowCount === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Pending withdrawal not found' });
+    }
+    await client.query(
+      `UPDATE user_rewards_ledger SET status = 'PAID' WHERE withdrawal_id = $1`,
+      [id]
+    );
+    await client.query('COMMIT');
+    return res.json({ success: true, withdrawal_id: id, status: 'PAID', tx_hash: txHash });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Mark withdrawal paid error:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  } finally {
+    client.release();
+  }
+}
+
+/** POST /api/rewards/withdrawals/:id/reject — operator returns rewards to UNCLAIMED. */
+async function rejectWithdrawal(req, res) {
+  const id = req.params.id;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await client.query(
+      `UPDATE withdrawal_requests
+          SET status = 'REJECTED', processed_at = CURRENT_TIMESTAMP
+        WHERE withdrawal_id = $1 AND status = 'PENDING'
+        RETURNING withdrawal_id`,
+      [id]
+    );
+    if (result.rowCount === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Pending withdrawal not found' });
+    }
+    // Release the held ledger rows back to UNCLAIMED.
+    await client.query(
+      `UPDATE user_rewards_ledger SET withdrawal_id = NULL WHERE withdrawal_id = $1`,
+      [id]
+    );
+    await client.query('COMMIT');
+    return res.json({ success: true, withdrawal_id: id, status: 'REJECTED' });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Reject withdrawal error:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  } finally {
+    client.release();
+  }
+}
+
+module.exports = {
+  getRewards,
+  claimRewards,
+  withdrawRewards,
+  listWithdrawals,
+  markWithdrawalPaid,
+  rejectWithdrawal,
+  fetchCoinUsdPrice,
+  POOL_COINGECKO,
+  ADDRESS_RULES,
+};

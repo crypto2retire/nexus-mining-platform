@@ -171,27 +171,70 @@ describe('claimRewards', () => {
 });
 
 describe('withdrawRewards', () => {
-  test('holds balance and creates a PENDING withdrawal request', async () => {
-    const client = makeClient({ balance: 50 });
+  function withdrawClient({ available = 5 } = {}) {
+    const client = {
+      query: jest.fn(async (sql) => {
+        if (sql.includes('SELECT user_id FROM users')) {
+          return { rowCount: 1, rows: [{ user_id: 'user-1' }] };
+        }
+        if (sql.includes("l.status = 'UNCLAIMED' AND l.withdrawal_id IS NULL")) {
+          return { rowCount: 1, rows: [{ ledger_id: 'ledger-1', calculated_reward_1: String(available) }] };
+        }
+        if (sql.includes('INSERT INTO withdrawal_requests')) {
+          return { rowCount: 1, rows: [{ withdrawal_id: 'withdraw-1' }] };
+        }
+        if (sql.includes('UPDATE user_rewards_ledger SET withdrawal_id')) {
+          return { rowCount: 1, rows: [] };
+        }
+        if (sql === 'BEGIN' || sql === 'COMMIT' || sql === 'ROLLBACK') {
+          return { rowCount: 1, rows: [] };
+        }
+        throw new Error(`unexpected sql: ${sql}`);
+      }),
+      release: jest.fn(),
+    };
+    pool.connect.mockResolvedValue(client);
+    return client;
+  }
+
+  test('holds unclaimed rewards and creates a PENDING coin withdrawal request', async () => {
+    const client = withdrawClient({ available: 5 });
     const res = makeRes();
-    await withdrawRewards({ body: { wallet: WALLET, amount_usdc: 25, to_address: '0x2222222222222222222222222222222222222222' } }, res);
+    await withdrawRewards({
+      body: { wallet: WALLET, target_pool: 'ZCASH', amount_coin: 2, to_address: 't1V5oarvihbomZswPw381AowjPpGj1t2B3K' },
+    }, res);
     expect(res.json).toHaveBeenCalledWith(
-      expect.objectContaining({ success: true, withdrawal_id: 'withdraw-1', amount_usdc: 25, status: 'PENDING' })
+      expect.objectContaining({ success: true, withdrawal_id: 'withdraw-1', target_pool: 'ZCASH', amount_coin: 2, status: 'PENDING' })
     );
-    const deduct = client.query.mock.calls.find(([sql]) => sql.includes('usdc_balance -'));
-    expect(deduct[1][0]).toBe(25);
+    // ledger rows held (withdrawal_id set)
+    const holds = client.query.mock.calls.filter(([sql]) => sql.includes('SET withdrawal_id'));
+    expect(holds.length).toBe(1);
   });
 
-  test('rejects withdrawals above the balance', async () => {
-    makeClient({ balance: 10 });
+  test('rejects withdrawals exceeding unclaimed rewards', async () => {
+    withdrawClient({ available: 1 });
     const res = makeRes();
-    await withdrawRewards({ body: { wallet: WALLET, amount_usdc: 25, to_address: '0x2222222222222222222222222222222222222222' } }, res);
+    await withdrawRewards({
+      body: { wallet: WALLET, target_pool: 'ZCASH', amount_coin: 5, to_address: 't1V5oarvihbomZswPw381AowjPpGj1t2B3K' },
+    }, res);
     expect(res.status).toHaveBeenCalledWith(400);
   });
 
-  test('rejects non-EVM destination addresses', async () => {
+  test('rejects invalid destination addresses for the coin', async () => {
+    withdrawClient({ available: 5 });
     const res = makeRes();
-    await withdrawRewards({ body: { wallet: WALLET, amount_usdc: 5, to_address: 't1V5oarvihbomZswPw381AowjPpGj1t2B3K' } }, res);
+    // ZEC addresses must start t1... — a 0x EVM address is not valid ZEC.
+    await withdrawRewards({
+      body: { wallet: WALLET, target_pool: 'ZCASH', amount_coin: 1, to_address: '0x2222222222222222222222222222222222222222' },
+    }, res);
+    expect(res.status).toHaveBeenCalledWith(400);
+  });
+
+  test('rejects unknown target pools', async () => {
+    const res = makeRes();
+    await withdrawRewards({
+      body: { wallet: WALLET, target_pool: 'DOGE', amount_coin: 1, to_address: 'DLB4xWPeFU9mXjLTJUJcQhNZX6pWPYv8VW' },
+    }, res);
     expect(res.status).toHaveBeenCalledWith(400);
   });
 });

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 
-export default function MiningRoomCard({ title, pool, rig, pendingReward, onUpgrade, onClaim }) {
+export default function MiningRoomCard({ title, pool, rig, pendingReward, onUpgrade, onClaim, onWithdraw }) {
   const [animating, setAnimating] = useState(false);
   const level = Number(rig?.level) || 1;
   const hashrate = Number(rig?.virtual_hashrate) || 0;
@@ -14,6 +14,12 @@ export default function MiningRoomCard({ title, pool, rig, pendingReward, onUpgr
   const handleClaim = () => {
     setAnimating(true);
     onClaim(pool);
+    setTimeout(() => setAnimating(false), 600);
+  };
+
+  const handleWithdraw = () => {
+    setAnimating(true);
+    onWithdraw(pool);
     setTimeout(() => setAnimating(false), 600);
   };
 
@@ -49,6 +55,9 @@ export default function MiningRoomCard({ title, pool, rig, pendingReward, onUpgr
         </button>
         <button className="btn-secondary" disabled={pendingReward <= 0} onClick={handleClaim}>
           Claim Yield
+        </button>
+        <button className="btn-secondary" disabled={pendingReward <= 0} onClick={handleWithdraw} title="Withdraw the mined token to your own wallet">
+          Withdraw {pool === 'ZCASH' ? 'ZEC' : pool === 'KASPA' ? 'KAS' : pool === 'LTC_DOGE' ? 'LTC' : 'XMR'}
         </button>
       </div>
     </div>

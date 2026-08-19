@@ -141,6 +141,32 @@ export default function App() {
     }
   };
 
+  // Withdraw pending yield in the mined token (e.g. ZEC for ZEC rewards) to a
+  // user-supplied wallet address of that coin.
+  const withdraw = async (pool) => {
+    try {
+      setError('');
+      const coinName = pool === 'ZCASH' ? 'ZEC' : pool === 'KASPA' ? 'KAS (Kaspa)' : pool === 'LTC_DOGE' ? 'LTC' : 'XMR';
+      const example =
+        pool === 'ZCASH' ? 't1...' : pool === 'KASPA' ? 'kaspa:...' : pool === 'LTC_DOGE' ? 'ltc1...' : '4...';
+      const amount = window.prompt(`Withdraw ${coinName} — how much? (available: ${Number(data.pending_rewards[pool] || 0).toFixed(8)})`, '');
+      if (!amount) return;
+      const toAddress = window.prompt(`Send ${coinName} to which address? (${example})`, '');
+      if (!toAddress) return;
+      const res = await fetch(`${API_BASE}/api/rewards/withdraw`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ wallet, target_pool: pool, amount_coin: Number(amount), to_address: toAddress }),
+      });
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error || 'Withdrawal request failed');
+      alert(`📤 Withdrawal requested: ${result.amount_coin} ${result.target_pool} to ${result.to_address}\nThe platform operator will send it and mark it PAID.`);
+      await fetchDashboard();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
   useEffect(() => {
     if (wallet && VALID_WALLET_RE.test(wallet)) fetchDashboard(wallet);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -255,6 +281,7 @@ export default function App() {
                   pendingReward={animated[pool.key] || data.pending_rewards[pool.key] || 0}
                   onUpgrade={upgrade}
                   onClaim={claim}
+                  onWithdraw={withdraw}
                 />
               ))}
             </section>

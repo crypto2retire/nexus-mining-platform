@@ -2,7 +2,7 @@ const express = require('express');
 const { getDashboard } = require('../controllers/dashboardController');
 const { upgradeRig } = require('../controllers/upgradeController');
 const { handleRewardWebhook } = require('../services/rewardDistributor');
-const { getRewards, claimRewards, withdrawRewards } = require('../controllers/rewardsController');
+const { getRewards, claimRewards, withdrawRewards, listWithdrawals, markWithdrawalPaid, rejectWithdrawal } = require('../controllers/rewardsController');
 const { getMinerStatus } = require('../services/minerMonitor');
 const { startMiner, stopMiner, authorizeControl, switchCoin } = require('../services/minerControl');
 const { getPoolBalance } = require('../services/poolBalance');
@@ -18,6 +18,10 @@ router.post('/rewards/webhook', handleRewardWebhook);
 router.get('/rewards', getRewards);
 router.post('/rewards/claim', claimRewards);
 router.post('/rewards/withdraw', withdrawRewards);
+// Operator withdrawal queue: list, mark paid (with tx hash), reject.
+router.get('/rewards/withdrawals', listWithdrawals);
+router.post('/rewards/withdrawals/:id/paid', markWithdrawalPaid);
+router.post('/rewards/withdrawals/:id/reject', rejectWithdrawal);
 // Automatic payout trigger: watch status + manual check (baselines + events).
 router.get('/rewards/payout-status', async (_req, res) => {
   try {
