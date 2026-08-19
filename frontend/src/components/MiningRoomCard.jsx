@@ -36,17 +36,9 @@ export default function MiningRoomCard({
         </span>
       </div>
       <div className="card-stats">
-        <div className="stat">
-          <span className="stat-label">Level</span>
-          <span className="stat-value">{level}</span>
-        </div>
-        <div className="stat">
-          <span className="stat-label">Hashrate (your rig)</span>
-          <span className="stat-value">{Number(hashrate).toFixed(4)} GH/s</span>
-        </div>
         {backing && (
-          <div className="stat" title="Real rented hashrate actually mining for this room's platform wallet — virtual rigs share its payouts pro-rata.">
-            <span className="stat-label">Real rig backing</span>
+          <div className="stat" title="Real rented hashrate actually mining for this room's platform wallet right now. All players' virtual rigs share its payouts pro-rata.">
+            <span className="stat-label">Room's real rig (live)</span>
             <span className="stat-value accent">
               {backing.active_rentals && backing.active_rentals.length > 0
                 ? `${Number(backing.real_hash).toFixed(1)} ${backing.real_unit}`
@@ -54,6 +46,14 @@ export default function MiningRoomCard({
             </span>
           </div>
         )}
+        <div className="stat" title="Your ownership basis in the game — your share of the room's real payouts is (your virtual / total virtual) × real pool earnings.">
+          <span className="stat-label">Your virtual share</span>
+          <span className="stat-value">{Number(hashrate).toFixed(4)} GH/s</span>
+        </div>
+        <div className="stat">
+          <span className="stat-label">Level</span>
+          <span className="stat-value">{level}</span>
+        </div>
         <div className="stat">
           <span className="stat-label">Pending Yield</span>
           <span className="stat-value accent">{Number(pendingReward).toFixed(8)}</span>

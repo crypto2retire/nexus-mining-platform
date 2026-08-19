@@ -160,7 +160,7 @@ export default function AdminPanel({ wallet }) {
                 <thead>
                   <tr>
                     <th>Coin</th>
-                    <th>Capacity</th>
+                    <th>Virtual capacity</th>
                     <th>Rigs</th>
                     <th>Mined</th>
                     <th>Users earned</th>
