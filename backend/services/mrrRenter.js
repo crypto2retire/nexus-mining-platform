@@ -246,10 +246,15 @@ async function placeHashpowerOrder(targetPool, spendBtcAmount) {
     }
 
     const result = await makeMrrRequest(
-      'POST',
-      `/rig/${fit.rigId}`,
+      'PUT',
+      '/rental',
       null,
-      { length: fit.length, profileid: profileId }
+      {
+        rig: fit.rigId,
+        length: fit.length,
+        profile: profileId,
+        currency: 'BTC',
+      }
     );
 
     const orderId =

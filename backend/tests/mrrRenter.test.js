@@ -143,12 +143,15 @@ describe('placeHashpowerOrder (MRR)', () => {
           },
         });
       }
-      if (url.includes('/rig/274435') && method === 'POST') {
-        // Body shape: {length: hours, profileid}. The renter extends the
-        // rental to spend the full user budget: 0.000475 / 0.000002181767/h
+      if (url.endsWith('/rental') && method === 'PUT') {
+        // Correct MRR v2 rental shape (per apidoc): PUT /rental with
+        // {rig, length, profile, currency}. The renter extends the rental
+        // to spend the full user budget: 0.000475 / 0.000002181767/h
         // ≈ 217h -> clamped to maxhours 120.
+        expect(JSON.parse(data).rig).toBe('274435');
         expect(JSON.parse(data).length).toBe(120);
-        expect(JSON.parse(data).profileid).toBe('40073');
+        expect(JSON.parse(data).profile).toBe('40073');
+        expect(JSON.parse(data).currency).toBe('BTC');
         return Promise.resolve({
           data: { success: true, data: { rental: { id: 'rental-999' } } },
         });
@@ -161,7 +164,7 @@ describe('placeHashpowerOrder (MRR)', () => {
     expect(result.mode).toBe('live');
     expect(result.orderId).toBe('rental-999');
 
-    // GET (market scan) + POST (rental) — and GET carried no body data.
+    // GET (market scan) + PUT (rental) — and GET carried no body data.
     const getCall = axios.mock.calls.find(([c]) => c.method === 'GET');
     expect(getCall[0].data).toBeUndefined();
   });
@@ -194,7 +197,7 @@ describe('placeHashpowerOrder (MRR)', () => {
     expect(result.success).toBe(false);
     expect(result.mode).toBe('live');
     expect(result.error).toMatch(/No affordable/);
-    // Only the market scan happened — no POST.
+    // Only the market scan happened — no rental PUT.
     expect(axios.mock.calls.every(([c]) => c.method === 'GET')).toBe(true);
   });
 
@@ -270,11 +273,11 @@ describe('makeMrrRequest', () => {
     expect(Number(second)).toBeGreaterThan(Number(first));
   });
 
-  test('POST requests attach the JSON body', async () => {
-    axios.mockResolvedValue({ data: { success: true } });
-    await makeMrrRequest('POST', '/rig/123', null, { length: 6, profileid: 'p1' });
-    const call = axios.mock.calls[0][0];
-    expect(call.data).toBe('{"length":6,"profileid":"p1"}');
+  test('PUT requests attach the JSON body', async () => {
+    axios.mockResolvedValue({ data: {} });
+    await makeMrrRequest('PUT', '/rental', null, { rig: 123, length: 6, profile: 'p1' });
+    const call = axios.mock.calls.find(([c]) => c.method === 'PUT');
+    expect(call[0].data).toBe('{"rig":123,"length":6,"profile":"p1"}');
   });
 });
 
