@@ -5,8 +5,10 @@ import LiveMinerPanel from './components/LiveMinerPanel';
 import MiningOpportunities from './components/MiningOpportunities';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
-const DEFAULT_WALLET = '0x0000000000000000000000000000000000000001';
 const STORAGE_KEY = 'nexus.wallet';
+// Nexus accounts are Ethereum-style addresses only (MetaMask / Coinbase Wallet /
+// Trust Wallet). Mining addresses (Monero, Zcash, Kaspa, Bitcoin) are NOT valid.
+const VALID_WALLET_RE = /^0x[a-f0-9]{40}$/i;
 
 const POOLS = [
   { key: 'ZCASH', title: 'Zcash (ZEC) Mine' },
@@ -42,24 +44,51 @@ function useAnimatedPending(pendingByPool) {
 }
 
 export default function App() {
-  const [wallet, setWallet] = useState(() => localStorage.getItem(STORAGE_KEY) || DEFAULT_WALLET);
+  const [wallet, setWallet] = useState(() => localStorage.getItem(STORAGE_KEY) || '');
+  const [connected, setConnected] = useState(false);
   const [minerStatus, setMinerStatus] = useState(null);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const fetchDashboard = async () => {
+  const fetchDashboard = async (address) => {
+    const addr = (address ?? wallet).trim().toLowerCase();
     setLoading(true);
     setError('');
     try {
-      const res = await fetch(`${API_BASE}/api/dashboard?wallet=${encodeURIComponent(wallet)}`);
-      if (!res.ok) throw new Error(await res.text());
+      const res = await fetch(`${API_BASE}/api/dashboard?wallet=${encodeURIComponent(addr)}`);
+      if (!res.ok) {
+        let msg = `Request failed (${res.status})`;
+        try {
+          const body = await res.json();
+          if (body?.error) msg = body.error;
+        } catch { /* keep default message */ }
+        throw new Error(msg);
+      }
       setData(await res.json());
+      setConnected(true);
     } catch (err) {
+      setConnected(false);
       setError(err.message);
     } finally {
       setLoading(false);
     }
+  };
+
+  const connectWallet = async () => {
+    setError('');
+    const trimmed = wallet.trim();
+    if (!VALID_WALLET_RE.test(trimmed)) {
+      setError(
+        "That address can't connect. Nexus accounts use an Ethereum-style wallet address — it starts with 0x followed by 40 letters/numbers (from MetaMask, Coinbase Wallet, or Trust Wallet). Mining addresses (Monero, Zcash, Kaspa, Bitcoin) are not supported for accounts."
+      );
+      setConnected(false);
+      return;
+    }
+    const normalized = trimmed.toLowerCase();
+    setWallet(normalized);
+    localStorage.setItem(STORAGE_KEY, normalized);
+    await fetchDashboard(normalized);
   };
 
   const upgrade = async (pool) => {
@@ -90,7 +119,8 @@ export default function App() {
   };
 
   useEffect(() => {
-    fetchDashboard();
+    if (wallet && VALID_WALLET_RE.test(wallet)) fetchDashboard(wallet);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Track the miner's current pool so the opportunities panel can mark ACTIVE.
@@ -132,18 +162,25 @@ export default function App() {
         <h1 className="logo">Nexus Mining Engine</h1>
         <div className="wallet-bar">
           <input
-            className="wallet-input"
+            className={`wallet-input${wallet && !VALID_WALLET_RE.test(wallet.trim()) ? ' invalid' : ''}`}
             value={wallet}
             onChange={(e) => {
               const v = e.target.value;
               setWallet(v);
               localStorage.setItem(STORAGE_KEY, v);
             }}
+            onKeyDown={(e) => { if (e.key === 'Enter') connectWallet(); }}
             placeholder="0x..."
+            spellCheck={false}
           />
-          <button className="btn-primary" onClick={fetchDashboard}>
-            Connect Wallet
+          <button className="btn-primary" onClick={connectWallet}>
+            {connected ? 'Reconnect' : 'Connect Wallet'}
           </button>
+          {connected && data && (
+            <span className="connected-chip" title={wallet}>
+              ✓ {wallet.slice(0, 6)}…{wallet.slice(-4)}
+            </span>
+          )}
         </div>
       </header>
 
@@ -151,12 +188,20 @@ export default function App() {
         {error && <div className="error-banner">{error}</div>}
         {loading && !data && <div className="loading">Loading dashboard…</div>}
 
+        {!wallet && !error && (
+          <div className="empty-wallet-banner">
+            Enter your Ethereum-style wallet address above (<strong>0x + 40 characters</strong> — from
+            MetaMask, Coinbase Wallet, or Trust Wallet) and click <strong>Connect Wallet</strong> to
+            create your account.
+          </div>
+        )}
+
         {data && (
           <>
-            {isEmptyAccount && (
+            {connected && isEmptyAccount && (
               <div className="empty-wallet-banner">
-                This wallet has no mining account yet. Enter your wallet address in the box
-                above, then click <strong>Connect Wallet</strong> to create one.
+                Account connected ✓ — your balance is 0.0000 USDC. Deposit USDC on the Base network to
+                fund upgrades, then upgrade any mine to start earning.
               </div>
             )}
 

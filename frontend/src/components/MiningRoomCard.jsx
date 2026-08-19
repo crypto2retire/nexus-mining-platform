@@ -37,7 +37,7 @@ export default function MiningRoomCard({ title, pool, rig, pendingReward, onUpgr
         <button
           className={`btn-primary ${animating ? 'pulse' : ''}`}
           onClick={handleUpgrade}
-          disabled={!rig}
+          disabled={level >= 5}
         >
           Upgrade Rig
         </button>
