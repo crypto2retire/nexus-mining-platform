@@ -9,6 +9,8 @@ const POOL_LABELS = {
   XMR: 'XMR',
 };
 
+const POOL_KEYS = ['ZCASH', 'KASPA', 'LTC_DOGE', 'XMR'];
+
 /**
  * Operator-only panel. Rendered only when the connected wallet is on the
  * ADMIN_WALLETS allow-list (backend sets is_admin on the dashboard payload).
@@ -19,6 +21,7 @@ export default function AdminPanel({ wallet }) {
   const [withdrawals, setWithdrawals] = useState(null);
   const [payoutStatus, setPayoutStatus] = useState(null);
   const [minerStatus, setMinerStatus] = useState(null);
+  const [stats, setStats] = useState(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
   const [txHashes, setTxHashes] = useState({});
@@ -35,14 +38,16 @@ export default function AdminPanel({ wallet }) {
 
   const loadAll = useCallback(async () => {
     try {
-      const [w, p, m] = await Promise.all([
+      const [w, p, m, s] = await Promise.all([
         fetch(`${API_BASE}/api/rewards/withdrawals`, { headers }).then((r) => r.json()),
         fetch(`${API_BASE}/api/rewards/payout-status`, { headers }).then((r) => r.json()),
         fetch(`${API_BASE}/api/miner/status`).then((r) => r.json()),
+        fetch(`${API_BASE}/api/admin/stats`, { headers }).then((r) => r.json()),
       ]);
       setWithdrawals(w.withdrawals || []);
       setPayoutStatus(p);
       setMinerStatus(m);
+      setStats(s);
     } catch (e) {
       setMsg(`Load failed: ${e.message}`);
     }
@@ -137,6 +142,54 @@ export default function AdminPanel({ wallet }) {
       {msg && <div className="admin-msg">{msg}</div>}
 
       <div className="admin-grid">
+        {/* Platform overview */}
+        <div className="admin-card">
+          <h3>Platform overview</h3>
+          {!stats ? (
+            <p className="admin-empty">Loading…</p>
+          ) : (
+            <>
+              <p className="admin-miner">
+                <strong>Users:</strong> {stats.users?.count ?? 0} ·{' '}
+                <strong>Deposits:</strong> ${Number(stats.deposits?.total_usdc ?? 0).toFixed(2)} USDC ({stats.deposits?.count ?? 0} txns)
+              </p>
+              <table className="admin-table">
+                <thead>
+                  <tr>
+                    <th>Coin</th>
+                    <th>Capacity</th>
+                    <th>Rigs</th>
+                    <th>Mined</th>
+                    <th>Users earned</th>
+                    <th>Treasury (5%)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {POOL_KEYS.map((key) => {
+                    const cap = stats.capacity_by_pool?.[key];
+                    const pay = stats.payouts_by_pool?.[key];
+                    const led = stats.ledger_by_pool?.[key];
+                    return (
+                      <tr key={key}>
+                        <td>{POOL_LABELS[key] || key}</td>
+                        <td>{cap ? Number(cap.total_hashrate).toFixed(2) : '0.00'} GH/s</td>
+                        <td>{cap?.rig_count ?? 0}</td>
+                        <td>{pay ? Number(pay.total_crypto).toFixed(6) : '0.000000'}</td>
+                        <td>{led ? Number(led.total_earned_crypto).toFixed(6) : '0.000000'}</td>
+                        <td>{pay ? Number(pay.treasury_share_crypto).toFixed(6) : '0.000000'}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              <p className="admin-miner">
+                <strong>Treasury protocol fees:</strong> ${Number(stats.treasury?.protocol_fees_usdc ?? 0).toFixed(2)} USDC
+                ({stats.treasury?.fee_count ?? 0} upgrades) — the 5% fee on every purchase.
+              </p>
+            </>
+          )}
+        </div>
+
         {/* Withdrawal queue */}
         <div className="admin-card">
           <h3>Withdrawal queue</h3>

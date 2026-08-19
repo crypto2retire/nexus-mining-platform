@@ -1,0 +1,110 @@
+/**
+ * Admin stats controller tests.
+ *
+ * getAdminStats must aggregate platform-wide capacity, payouts, treasury fees
+ * and the user rewards ledger into a shape the operator dashboard renders.
+ */
+const { getAdminStats } = require('../controllers/adminStatsController');
+const { pool } = require('../config/db');
+
+jest.mock('../config/db', () => ({
+  pool: { query: jest.fn() },
+}));
+
+function makeRes() {
+  const res = { statusCode: 200, body: null };
+  res.status = jest.fn((code) => {
+    res.statusCode = code;
+    return res;
+  });
+  res.json = jest.fn((obj) => {
+    res.body = obj;
+    return res;
+  });
+  return res;
+}
+
+describe('adminStatsController.getAdminStats', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('aggregates capacity, payouts, fees, ledger, users and deposits', async () => {
+    pool.query
+      .mockResolvedValueOnce({
+        rows: [
+          { target_pool: 'KASPA', total_hashrate: '125', rig_count: '3' },
+          { target_pool: 'ZCASH', total_hashrate: '60', rig_count: '2' },
+        ],
+      }) // capacity
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            target_pool: 'KASPA',
+            payout_count: '2',
+            total_crypto: '100.00000000',
+            users_share_crypto: '95.00000000',
+            treasury_share_crypto: '5.00000000',
+          },
+        ],
+      }) // payouts
+      .mockResolvedValueOnce({
+        rows: [{ total_fees_usdc: '12.50', fee_count: '3' }],
+      }) // protocol fees
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            target_pool: 'KASPA',
+            total_earned_crypto: '95.00000000',
+            unclaimed_crypto: '60.00000000',
+            claimed_crypto: '20.00000000',
+            paid_crypto: '15.00000000',
+          },
+        ],
+      }) // ledger
+      .mockResolvedValueOnce({ rows: [{ user_count: '4' }] }) // users
+      .mockResolvedValueOnce({
+        rows: [{ total_deposits_usdc: '250.0000', deposit_count: '5' }],
+      }); // deposits
+
+    const res = makeRes();
+    await getAdminStats({}, res);
+
+    // Guard: confirm the mock chain consumed exactly as expected.
+    expect(pool.query).toHaveBeenCalledTimes(6);
+    expect(res.statusCode).toBe(200);
+    expect(res.body.capacity_by_pool.KASPA.total_hashrate).toBe(125);
+    expect(res.body.capacity_by_pool.ZCASH.rig_count).toBe(2);
+    expect(res.body.payouts_by_pool.KASPA.total_crypto).toBe(100);
+    expect(res.body.payouts_by_pool.KASPA.treasury_share_crypto).toBe(5);
+    expect(res.body.treasury.protocol_fees_usdc).toBe(12.5);
+    expect(res.body.ledger_by_pool.KASPA.unclaimed_crypto).toBe(60);
+    expect(res.body.users.count).toBe(4);
+    expect(res.body.deposits.total_usdc).toBe(250);
+  });
+
+  it('returns zeros gracefully when tables are empty', async () => {
+    pool.query.mockResolvedValue({ rows: [] });
+
+    const res = makeRes();
+    await getAdminStats({}, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.capacity_by_pool).toEqual({});
+    expect(res.body.payouts_by_pool).toEqual({});
+    expect(res.body.ledger_by_pool).toEqual({});
+    expect(res.body.treasury.protocol_fees_usdc).toBe(0);
+    expect(res.body.users.count).toBe(0);
+    expect(res.body.deposits.total_usdc).toBe(0);
+  });
+
+  it('returns 500 on a DB failure', async () => {
+    pool.query.mockRejectedValue(new Error('db down'));
+
+    const res = makeRes();
+    await getAdminStats({}, res);
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body.error).toMatch(/Internal/);
+  });
+});

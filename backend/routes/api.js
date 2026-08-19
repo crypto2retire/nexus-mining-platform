@@ -3,6 +3,7 @@ const { getDashboard } = require('../controllers/dashboardController');
 const { upgradeRig } = require('../controllers/upgradeController');
 const { handleRewardWebhook } = require('../services/rewardDistributor');
 const { getRewards, claimRewards, withdrawRewards, listWithdrawals, markWithdrawalPaid, rejectWithdrawal } = require('../controllers/rewardsController');
+const { getAdminStats } = require('../controllers/adminStatsController');
 const { getMinerStatus } = require('../services/minerMonitor');
 const { startMiner, stopMiner, authorizeControl, switchCoin } = require('../services/minerControl');
 const { getPoolBalance } = require('../services/poolBalance');
@@ -24,6 +25,8 @@ router.post('/rewards/withdraw', withdrawRewards);
 router.get('/rewards/withdrawals', requireAdmin, listWithdrawals);
 router.post('/rewards/withdrawals/:id/paid', requireAdmin, markWithdrawalPaid);
 router.post('/rewards/withdrawals/:id/reject', requireAdmin, rejectWithdrawal);
+// Operator dashboard: platform-wide capacity, rewards, treasury, users.
+router.get('/admin/stats', requireAdmin, getAdminStats);
 // Automatic payout trigger: watch status + manual check (baselines + events).
 // Status is admin-only (internal state); manual check triggers real API calls.
 router.get('/rewards/payout-status', requireAdmin, async (_req, res) => {
