@@ -1,13 +1,14 @@
-const { spawn, exec } = require('child_process');
+const { exec } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
 /**
- * Miner control — starts and stops the local XMRig process.
+ * Miner control — starts and stops the local XMRig process (via launchd).
  *
  * Local mode (this server runs the miner):
- *   XMRIG_DIR, XMRIG_CONFIG  → spawn/kill the miner directly
+ *   the miner is a launchd agent (com.nexus.xmrig) — start/stop bootstrap /
+ *   bootout the job, so Stop stays stopped and Start auto-heals on crash.
  * Remote mode (this server proxies to the machine that runs the miner):
  *   MINER_CONTROL_URL + MINER_CONTROL_KEY → POST to the remote control endpoint
  *
@@ -18,6 +19,16 @@ const path = require('path');
 const DEFAULT_DIR = path.join(os.homedir(), 'xmrig-test', 'xmrig-6.26.0');
 const DEFAULT_CONFIG = path.join(os.homedir(), 'xmrig-test', 'config-xmr.json');
 const LOG_FILE = process.env.XMRIG_LOG || '/tmp/xmrig.log';
+
+// The miner runs as a launchd agent (com.nexus.xmrig, KeepAlive=true) so it
+// survives reboots and auto-restarts on crash. Start/Stop therefore control
+// the launchd job instead of raw pkill/spawn:
+//   stop  → launchctl bootout   (job unloaded — stays stopped)
+//   start → launchctl bootstrap (job loaded — runs + auto-heals)
+const LAUNCHD_LABEL = 'com.nexus.xmrig';
+const LAUNCHD_PLIST = path.join(os.homedir(), 'Library', 'LaunchAgents', `${LAUNCHD_LABEL}.plist`);
+// The config the launchd job always runs (coin switching rewrites this file).
+const ACTIVE_CONFIG = process.env.XMRIG_CONFIG || DEFAULT_CONFIG;
 
 function isLocalMiner() {
   return Boolean(process.env.XMRIG_DIR) || fs.existsSync(path.join(DEFAULT_DIR, 'xmrig'));
@@ -30,44 +41,34 @@ function isRunning() {
 }
 
 function startLocal() {
-  return new Promise((resolve, reject) => {
-    const dir = process.env.XMRIG_DIR || DEFAULT_DIR;
-    const config = process.env.XMRIG_CONFIG || DEFAULT_CONFIG;
-    const bin = path.join(dir, 'xmrig');
-    if (!fs.existsSync(bin)) {
-      return reject(new Error(`XMRig binary not found at ${bin}`));
-    }
-    const logFd = fs.openSync(LOG_FILE, 'a');
-    const child = spawn(bin, ['-c', config], {
-      cwd: dir,
-      detached: true,
-      stdio: ['ignore', logFd, logFd],
+  return new Promise((resolve) => {
+    exec(`launchctl bootstrap gui/$(id -u) ${LAUNCHD_PLIST}`, () => {
+      // 'already loaded' errors are fine — the job is what we want.
+      setTimeout(async () => {
+        try {
+          const running = await isRunning();
+          resolve({ started: running, source: 'launchd' });
+        } catch (e) {
+          resolve({ started: false, source: 'launchd', error: e.message });
+        }
+      }, 3000);
     });
-    child.unref();
-    // Give it a moment to start, then confirm.
-    setTimeout(async () => {
-      try {
-        const running = await isRunning();
-        resolve({ started: running, pid: child.pid });
-      } catch (e) {
-        reject(e);
-      }
-    }, 3000);
   });
 }
 
 function stopLocal() {
-  return new Promise((resolve, reject) => {
-    exec('pkill -f "xmrig -c"', (err) => {
-      if (err && err.code !== 1) return reject(err); // exit 1 = no process, fine
-      resolve({ stopped: true });
+  return new Promise((resolve) => {
+    exec(`launchctl bootout gui/$(id -u)/${LAUNCHD_LABEL}`, () => {
+      // 'service not loaded' errors are fine — the job is already stopped.
+      resolve({ stopped: true, source: 'launchd' });
     });
   });
 }
 
 /**
  * Build an XMRig config for a target coin (see coinRegistry) and write it to
- * ~/xmrig-test/config-<SYMBOL>.json. Returns the config path.
+ * the ACTIVE_CONFIG path the launchd job always runs
+ * (default: ~/xmrig-test/config-xmr.json). Returns the config path.
  */
 function writeCoinConfig(coin) {
   const fs = require('fs');
@@ -94,35 +95,8 @@ function writeCoinConfig(coin) {
     http: { enabled: true, host: '127.0.0.1', port: 8080, 'access-token': process.env.XMRIG_API_TOKEN || 'nexus', restricted: false },
   };
   if (!config.pools[0].coin) delete config.pools[0].coin;
-  const configPath = path.join(os.homedir(), 'xmrig-test', `config-${coin.symbol.toLowerCase()}.json`);
-  fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
-  return configPath;
-}
-
-/** Start the miner with an explicit config path (used by coin switching). */
-function startLocalWithConfig(configPath) {
-  return new Promise((resolve, reject) => {
-    const dir = process.env.XMRIG_DIR || DEFAULT_DIR;
-    const bin = path.join(dir, 'xmrig');
-    if (!fs.existsSync(bin)) {
-      return reject(new Error(`XMRig binary not found at ${bin}`));
-    }
-    const logFd = fs.openSync(LOG_FILE, 'a');
-    const child = spawn(bin, ['-c', configPath], {
-      cwd: dir,
-      detached: true,
-      stdio: ['ignore', logFd, logFd],
-    });
-    child.unref();
-    setTimeout(async () => {
-      try {
-        const running = await isRunning();
-        resolve({ started: running, pid: child.pid });
-      } catch (e) {
-        reject(e);
-      }
-    }, 3000);
-  });
+  fs.writeFileSync(ACTIVE_CONFIG, JSON.stringify(config, null, 2));
+  return ACTIVE_CONFIG;
 }
 
 /**
@@ -135,7 +109,7 @@ async function switchCoin(coin) {
   const configPath = writeCoinConfig(coin);
   // Small settle so the old process fully releases port 8080.
   await new Promise((r) => setTimeout(r, 1200));
-  const result = await startLocalWithConfig(configPath);
+  const result = await startLocal();
   return { ok: true, symbol: coin.symbol, pool: coin.pool, config: configPath, ...result };
 }
 

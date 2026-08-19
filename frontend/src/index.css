@@ -81,6 +81,75 @@ body {
   white-space: nowrap;
 }
 
+.get-started {
+  margin: 1rem 0;
+}
+
+.get-started-toggle {
+  font-size: 0.95rem;
+}
+
+.get-started-card {
+  margin-top: 0.75rem;
+  padding: 1.25rem 1.5rem;
+  border-radius: 0.75rem;
+  border: 1px solid var(--border);
+  background: var(--card-bg, var(--bg));
+}
+
+.get-started-card h3 {
+  margin: 0 0 0.5rem;
+}
+
+.get-started-intro {
+  margin: 0 0 1rem;
+  color: var(--muted, #9aa4b2);
+  line-height: 1.5;
+}
+
+.get-started-steps {
+  margin: 0;
+  padding-left: 1.4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  line-height: 1.55;
+}
+
+.get-started-steps a {
+  color: #4fc3f7;
+}
+
+.get-started-steps code {
+  background: rgba(127, 127, 127, 0.15);
+  padding: 0.1rem 0.4rem;
+  border-radius: 0.3rem;
+  font-size: 0.85em;
+}
+
+.deposit-address {
+  margin: 0.5rem 0 0;
+  padding: 0.6rem 0.8rem;
+  border-radius: 0.5rem;
+  background: rgba(127, 127, 127, 0.12);
+  border: 1px dashed var(--border);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+  word-break: break-all;
+  user-select: all;
+}
+
+.get-started-tip {
+  margin-top: 1rem;
+  padding: 0.7rem 0.9rem;
+  border-radius: 0.5rem;
+  background: rgba(241, 196, 15, 0.1);
+  border: 1px solid rgba(241, 196, 15, 0.35);
+  color: var(--text);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
 .container {
   flex: 1;
   max-width: 1200px;

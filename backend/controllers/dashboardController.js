@@ -74,6 +74,7 @@ async function getDashboard(req, res) {
         usdc_balance: Number(wallet.rows[0]?.usdc_balance || 0),
         rigs: rigsByPool,
         pending_rewards: pendingByPool,
+        deposit_address: process.env.PLATFORM_TREASURY_WALLET || null,
       });
     } finally {
       client.release();
