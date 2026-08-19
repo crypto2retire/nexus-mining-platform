@@ -180,6 +180,13 @@ const HASH_TYPE_TO_BASE = {
   scrypt: { kh: 1e-6, mh: 1e-3, gh: 1, th: 1e3 },
 };
 
+// MRR rejects orders whose TOTAL cost is below this floor (verified 2026-08-19
+// live: a 24h IceRiver KS0 at 8.9e-7 BTC was rejected with code 104
+// "The cost to rent this rig is too low for our system to process (<0.00000100)").
+// The picker must never propose an unplaceable order — skip any candidate whose
+// computed cost lands below the floor.
+const MIN_ORDER_BTC = 0.000001;
+
 /** Advertised hashrate in the algo's natural unit; null when unknown. */
 function advertisedInBase(rig, algorithm) {
   const adv = rig?.hashrate?.advertised;
@@ -224,6 +231,7 @@ async function findAffordableRig(algorithm, budgetBtc) {
       MAX_RENTAL_HOURS
     );
     const cost = to8(length * hourly);
+    if (cost < MIN_ORDER_BTC) continue; // unplaceable — MRR rejects sub-minimum orders
     if (cost <= budgetBtc) {
       candidates.push({
         rigId: rig.id,
@@ -386,4 +394,5 @@ module.exports = {
   PROVIDER_NAME,
   LIVE_ORDERS_ENV,
   MRR_HOST,
+  MIN_ORDER_BTC,
 };

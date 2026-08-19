@@ -344,6 +344,24 @@ describe('findAffordableRig', () => {
     const fit = await findAffordableRig('zhash', 0.000475);
     expect(fit).toBeNull();
   });
+
+  test('skips candidates whose total cost is below the MRR order minimum (code 104 floor)', async () => {
+    axios.mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          records: [
+            // 24h x 3.7e-8 = 8.88e-7 BTC < 0.000001 -> MRR rejects with code 104
+            { id: 'too-cheap', rpi: '99.00', price: { BTC: { hour: '0.000000037' } }, minhours: 24, maxhours: 24 },
+            // 24h x 1e-7 = 2.4e-6 BTC >= 0.000001 -> placeable
+            { id: 'placeable', rpi: '98.00', price: { BTC: { hour: '0.0000001' } }, minhours: 3, maxhours: 24 },
+          ],
+        },
+      },
+    });
+    const fit = await findAffordableRig('kheavyhash', 0.00008);
+    expect(fit.rigId).toBe('placeable');
+  });
 });
 
 describe('makeMrrRequest', () => {
