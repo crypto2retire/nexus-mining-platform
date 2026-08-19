@@ -264,6 +264,7 @@ async function upgradeRig(req, res) {
   let nextTier = null;
   let protocolFeeUsdc = null;
   let spendBtcAmount = null;
+  let netPurchaseUsdc = null;
   let discountPct = 0;
   let discountedCost = null;
 
@@ -310,7 +311,7 @@ async function upgradeRig(req, res) {
     }
 
     protocolFeeUsdc = toSatPrecision(discountedCost * PROTOCOL_FEE_PCT);
-    const netPurchaseUsdc = toSatPrecision(discountedCost - protocolFeeUsdc);
+    netPurchaseUsdc = toSatPrecision(discountedCost - protocolFeeUsdc);
     spendBtcAmount = toSatPrecision(netPurchaseUsdc / btcSpotPrice);
 
     // Reserve the request_id with a PENDING order row. ON CONFLICT DO NOTHING
@@ -459,8 +460,19 @@ async function upgradeRig(req, res) {
 
   // GoMiner backing ledger (010): a live MRR order is the rig's first real
   // rental — record it so the rental scheduler knows this rig is backed and
-  // can later re-rent within the rig's collected maintenance. The buy-in
-  // (95% of the tier price, in USD) is the rig's initial fund.
+  // can later re-rent within the rig's collected maintenance.
+  //
+  // Accounting (fixed 2026-08-19 — hit live on order 5698667):
+  //   - netPurchaseUsdc must be FUNCTION-scoped (was declared inside the tx
+  //     → ReferenceError → the rig_rentals row silently never recorded).
+  //   - rig_rentals.cost_usd = the ACTUAL rental cost (orderResult.actualCostBtc
+  //     × spot), NOT the buy-in allocation — the scheduler computes
+  //     available = SUM(maintenance) − SUM(rentals.cost_usd) per user+pool.
+  //   - The buy-in (95% of tier) is credited to maintenance_fee_ledger as the
+  //     rig's INITIAL FUND (source 'POOL'). Without that credit the math goes
+  //     negative and every bought rig auto-DORMs at the next scheduler tick.
+  //   - Balance check: user paid $4.75 → $0.2375 fee (revenue) + $0.217 rental
+  //     + $4.2955 rig fund. Books balance exactly.
   if (providerName === 'MRR' && orderResult.mode === 'live' && orderResult.orderId) {
     try {
       const rigIdRes = await pool.query(
@@ -469,6 +481,16 @@ async function upgradeRig(req, res) {
       );
       const rigId = rigIdRes.rows[0]?.rig_id;
       if (rigId) {
+        const actualCostBtc =
+          Number(orderResult.actualCostBtc || 0) > 0 ? Number(orderResult.actualCostBtc) : spendBtcAmount;
+        const actualCostUsd = toSatPrecision(actualCostBtc * btcSpotPrice);
+        // The rig's initial maintenance fund (95% of the tier price).
+        await pool.query(
+          `INSERT INTO maintenance_fee_ledger
+            (user_id, target_pool, hashrate_ghs, days, amount_usdc, source)
+           VALUES ($1, $2, $3, 0, $4, 'POOL')`,
+          [userId, targetPool, nextTier.hashrate, netPurchaseUsdc]
+        );
         await pool.query(
           `INSERT INTO rig_rentals
             (user_id, rig_id, target_pool, mrr_rental_id, rig_name, rig_rpi,
@@ -481,12 +503,14 @@ async function upgradeRig(req, res) {
             String(orderResult.orderId),
             orderResult.rigName || null,
             orderResult.rigRpi != null ? String(orderResult.rigRpi) : null,
-            spendBtcAmount,
-            netPurchaseUsdc,
+            actualCostBtc,
+            actualCostUsd,
             orderResult.rigHours || null,
           ]
         );
-        console.log(`Rig ${rigId}/${targetPool} backed by MRR rental ${orderResult.orderId} ($${netPurchaseUsdc})`);
+        console.log(
+          `Rig ${rigId}/${targetPool} backed by MRR rental ${orderResult.orderId} (fund $${netPurchaseUsdc}, rental $${actualCostUsd})`
+        );
       }
     } catch (recordErr) {
       // Recording failure must not break the upgrade response — the order is

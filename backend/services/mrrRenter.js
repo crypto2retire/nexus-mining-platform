@@ -362,10 +362,20 @@ async function placeHashpowerOrder(targetPool, spendBtcAmount) {
       result?.id ||
       null;
 
+    // Total BTC actually paid for this rental (order cost, not the converted
+    // budget). MRR returns it as price.paid; the controller books the ACTUAL
+    // cost in rig_rentals so the scheduler's available math stays honest.
+    const actualCostBtc = Number(
+      result?.data?.rental?.price?.paid ||
+      result?.data?.price?.paid ||
+      0
+    ) || 0;
+
     return {
       success: true,
       mode: 'live',
       orderId,
+      actualCostBtc,
       rigName: fit.rigName,
       rigRpi: fit.rigRpi,
       rigHours: fit.length,

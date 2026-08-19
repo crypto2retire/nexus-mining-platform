@@ -374,4 +374,55 @@ describe('upgradeRig — currency conversion + order loop', () => {
     expect(res2.body.btc_spent).toBe(0.000475);
     expect(placeHashpowerOrder).toHaveBeenCalledWith('LTC_DOGE', 0.000475);
   });
+
+  test('MRR live order: books the ACTUAL rental cost and credits the buy-in as the rig maintenance fund (GoMiner 010 accounting)', async () => {
+    process.env.NODE_ENV = 'production';
+    process.env.MRR_LIVE_ORDERS = '1';
+    process.env.MARKETPLACE_PROVIDER = 'mrr';
+    const mrrPlace = require('../services/mrrRenter').placeHashpowerOrder;
+    mrrPlace.mockResolvedValue({
+      success: true,
+      mode: 'live',
+      orderId: '5699001',
+      actualCostBtc: 0.00000316,
+      rigName: 'ICERIVER KS0 PRO',
+      rigRpi: 100,
+      rigHours: 72,
+      mrrResponse: {},
+    });
+    const { client } = makeClient({ balance: 1000, coins: 2 });
+    pool.connect.mockResolvedValue(client);
+    // The GoMiner backing ledger runs AFTER the tx via module-level pool.query.
+    pool.query.mockImplementation(async (sql) => {
+      if (sql.includes('SELECT rig_id FROM virtual_rigs')) {
+        return { rowCount: 1, rows: [{ rig_id: 'rig-1' }] };
+      }
+      return { rowCount: 0, rows: [] };
+    });
+
+    const res = makeRes();
+    await upgradeRig(req({ target_pool: 'KASPA', request_id: 'req-live-mrr' }), res);
+
+    expect(res.body.success).toBe(true);
+    expect(res.body.order_status).toBe('PLACED');
+    expect(mrrPlace).toHaveBeenCalledTimes(1);
+
+    // 1) The rig's initial fund: buy-in credited to the maintenance pool.
+    const poolCalls = pool.query.mock.calls.map(([sql, params]) => ({ sql, params }));
+    const maintInsert = poolCalls.find((c) => c.sql.includes('INSERT INTO maintenance_fee_ledger'));
+    expect(maintInsert).toBeTruthy();
+    // KASPA tier 2 = $5, 2 coins -> 5% off -> $4.75; fee $0.2375; fund $4.5125.
+    expect(Number(maintInsert.params[3])).toBeCloseTo(4.5125, 2);
+    expect(maintInsert.sql).toContain("'POOL'"); // source is a SQL literal, not a param
+
+    // 2) rig_rentals records the ACTUAL cost (not the buy-in allocation).
+    const rentalInsert = poolCalls.find((c) => c.sql.includes('INSERT INTO rig_rentals'));
+    expect(rentalInsert).toBeTruthy();
+    expect(rentalInsert.params[3]).toBe('5699001'); // mrr_rental_id
+    expect(rentalInsert.params[6]).toBe(0.00000316); // cost_btc = actual
+    expect(rentalInsert.params[7]).toBeCloseTo(0.316, 0); // 3.16e-6 * 100000 spot
+    expect(rentalInsert.params[8]).toBe(72); // length_hours
+    expect(rentalInsert.sql).toContain("'POOL'"); // funded_from literal
+    expect(rentalInsert.sql).toContain("'ACTIVE'"); // status literal
+  });
 });
