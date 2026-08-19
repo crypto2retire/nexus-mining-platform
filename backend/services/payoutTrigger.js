@@ -33,7 +33,12 @@ const WATCHES = {
     walletEnv: 'MRR_PLATFORM_WALLET_ZEC',
     accountUrl: (addr) => `https://zec.2miners.com/api/accounts/${addr}`,
     statsUrl: 'https://zec.2miners.com/api/stats',
-    balanceOf: (d) => Number(d.balance),
+    // 2Miners account API v2 keeps the unpaid balance at stats.balance
+    // (top-level `balance` does NOT exist — verified 2026-08-19 live on the
+    // KAS wallet; the old balanceOf read Number(d.balance) = 0 forever, so the
+    // KAS/ZEC payout watches could never fire). Fall back to d.balance for
+    // API variants that still expose it.
+    balanceOf: (d) => Number(d?.stats?.balance ?? d?.balance ?? 0),
     netHashOf: (d) => Number(d.nodes?.[0]?.networkhashps) || null,
   },
   KASPA: {
@@ -41,7 +46,7 @@ const WATCHES = {
     walletEnv: 'MRR_PLATFORM_WALLET_KAS',
     accountUrl: (addr) => `https://kas.2miners.com/api/accounts/${addr}`,
     statsUrl: 'https://kas.2miners.com/api/stats',
-    balanceOf: (d) => Number(d.balance),
+    balanceOf: (d) => Number(d?.stats?.balance ?? d?.balance ?? 0),
     netHashOf: (d) => Number(d.nodes?.[0]?.networkhashps) || null,
   },
   XMR: {

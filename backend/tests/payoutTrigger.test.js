@@ -31,6 +31,23 @@ describe('DOGE merged watch (011)', () => {
   });
 });
 
+describe('2Miners watches (ZEC/KAS) — stats.balance fix', () => {
+  test('KASPA balanceOf reads stats.balance (top-level balance does not exist)', () => {
+    const cfg = WATCHES.KASPA;
+    // Verified live 2026-08-19: the account API has NO top-level `balance`.
+    const bal = cfg.balanceOf({ stats: { balance: '125011636' } });
+    expect(bal).toBe(125011636);
+    expect(bal).not.toBe(0); // the old Number(d.balance) returned 0 forever
+  });
+
+  test('ZCASH balanceOf reads stats.balance with a top-level fallback', () => {
+    const cfg = WATCHES.ZCASH;
+    expect(cfg.balanceOf({ stats: { balance: '100' } })).toBe(100);
+    // API variant that still uses top-level balance.
+    expect(cfg.balanceOf({ balance: '50' })).toBe(50);
+  });
+});
+
 describe('computePayoutEvent (payout trigger decision logic)', () => {
   test('no baseline → baseline (no event)', () => {
     expect(computePayoutEvent(null, 5)).toEqual({ action: 'baseline' });
