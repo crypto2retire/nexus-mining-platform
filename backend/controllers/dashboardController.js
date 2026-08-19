@@ -1,5 +1,6 @@
 const { pool } = require('../config/db');
 const { isAdminWallet } = require('../middleware/adminAuth');
+const { getBacking } = require('../services/backingMonitor');
 const { tiersFor } = require('./upgradeController');
 const { coinsOwnedFor, discountPctFor } = require('../services/multiCoinDiscount');
 
@@ -111,6 +112,8 @@ async function getDashboard(req, res) {
         pending_rewards_2: pendingDogeByPool,
         multi_coin: { coins_owned: coinsOwned, discount_pct: discountPctFor(coinsOwned) },
         is_admin: isAdminWallet(walletAddress),
+        // Real backing per coin (cached 60s) — what ACTUALLY mines this room.
+        backing: await getBacking(),
         // Never expose a missing/zero-address treasury — the zero address is a
         // burn address and players would lose real USDC sending to it.
         deposit_address: isSafeTreasury() ? process.env.PLATFORM_TREASURY_WALLET : null,

@@ -90,11 +90,15 @@ export default function LiveMinerPanel({ isAdmin = false, wallet = '' }) {
   return (
     <section className="mining-card miner-panel">
       <div className="card-header">
-        <h2>Live Miner — Local Machine</h2>
+        <h2>Local Miner (Mac mini) — XMR</h2>
         <span className={`status-pill ${!online ? 'idle' : stale ? 'stale' : 'active'}`}>
           {!online ? 'OFFLINE' : stale ? `STALE · ${lastSeenLabel}` : 'MINING'}
         </span>
       </div>
+      <p className="admin-only-note" style={{ marginTop: 0 }}>
+        This is the operator's own Monero miner — the self-mined demo pool. It is
+        separate from the rented rigs (see Real rig backing on each room card).
+      </p>
 
       {error && <div className="error-banner">Miner monitor: {error}</div>}
       {balanceError && <div className="error-banner">Balance: {balanceError}</div>}

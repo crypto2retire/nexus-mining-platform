@@ -10,12 +10,13 @@ const COIN_NAMES = {
 export default function MiningRoomCard({
   title, pool, rig, pendingReward, upgradeCost,
   maintenanceRate, onUpgrade, onClaim, onWithdraw, onReinvest,
-  mineAtLoss, onToggleLoss, discountPct, pendingDoge,
+  mineAtLoss, onToggleLoss, discountPct, pendingDoge, realBacking,
 }) {
   const [animating, setAnimating] = useState(false);
   const level = Number(rig?.level) || 1;
   const hashrate = Number(rig?.virtual_hashrate) || 0;
   const dormant = rig?.maintenance_status === 'DORMANT';
+  const backing = realBacking && realBacking.real_hash != null ? realBacking : null;
 
   const pulse = (fn) => {
     setAnimating(true);
@@ -40,9 +41,19 @@ export default function MiningRoomCard({
           <span className="stat-value">{level}</span>
         </div>
         <div className="stat">
-          <span className="stat-label">Hashrate</span>
+          <span className="stat-label">Hashrate (your rig)</span>
           <span className="stat-value">{Number(hashrate).toFixed(4)} GH/s</span>
         </div>
+        {backing && (
+          <div className="stat" title="Real rented hashrate actually mining for this room's platform wallet — virtual rigs share its payouts pro-rata.">
+            <span className="stat-label">Real rig backing</span>
+            <span className="stat-value accent">
+              {backing.active_rentals && backing.active_rentals.length > 0
+                ? `${Number(backing.real_hash).toFixed(1)} ${backing.real_unit}`
+                : 'no rig running'}
+            </span>
+          </div>
+        )}
         <div className="stat">
           <span className="stat-label">Pending Yield</span>
           <span className="stat-value accent">{Number(pendingReward).toFixed(8)}</span>

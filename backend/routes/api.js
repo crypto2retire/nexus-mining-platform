@@ -32,6 +32,15 @@ router.post('/rewards/withdrawals/:id/paid', requireAdmin, markWithdrawalPaid);
 router.post('/rewards/withdrawals/:id/reject', requireAdmin, rejectWithdrawal);
 // Operator dashboard: platform-wide capacity, rewards, treasury, users.
 router.get('/admin/stats', requireAdmin, getAdminStats);
+// Real Backing panel: what ACTUALLY mines per coin vs virtual capacity sold.
+router.get('/admin/backing', requireAdmin, async (_req, res) => {
+  try {
+    const { getBacking } = require('../services/backingMonitor');
+    res.json({ backing: await getBacking() });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 // Automatic payout trigger: watch status + manual check (baselines + events).
 // Status is admin-only (internal state); manual check triggers real API calls.
 router.get('/rewards/payout-status', requireAdmin, async (_req, res) => {

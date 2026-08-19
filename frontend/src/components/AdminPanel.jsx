@@ -22,6 +22,7 @@ export default function AdminPanel({ wallet }) {
   const [payoutStatus, setPayoutStatus] = useState(null);
   const [minerStatus, setMinerStatus] = useState(null);
   const [stats, setStats] = useState(null);
+  const [backing, setBacking] = useState(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
   const [txHashes, setTxHashes] = useState({});
@@ -38,16 +39,18 @@ export default function AdminPanel({ wallet }) {
 
   const loadAll = useCallback(async () => {
     try {
-      const [w, p, m, s] = await Promise.all([
+      const [w, p, m, s, b] = await Promise.all([
         fetch(`${API_BASE}/api/rewards/withdrawals`, { headers }).then((r) => r.json()),
         fetch(`${API_BASE}/api/rewards/payout-status`, { headers }).then((r) => r.json()),
         fetch(`${API_BASE}/api/miner/status`).then((r) => r.json()),
         fetch(`${API_BASE}/api/admin/stats`, { headers }).then((r) => r.json()),
+        fetch(`${API_BASE}/api/admin/backing`, { headers }).then((r) => r.json()),
       ]);
       setWithdrawals(w.withdrawals || []);
       setPayoutStatus(p);
       setMinerStatus(m);
       setStats(s);
+      setBacking(b.backing || null);
     } catch (e) {
       setMsg(`Load failed: ${e.message}`);
     }
@@ -185,6 +188,66 @@ export default function AdminPanel({ wallet }) {
               <p className="admin-miner">
                 <strong>Treasury protocol fees:</strong> ${Number(stats.treasury?.protocol_fees_usdc ?? 0).toFixed(2)} USDC
                 ({stats.treasury?.fee_count ?? 0} upgrades) — the 5% fee on every purchase.
+              </p>
+            </>
+          )}
+        </div>
+
+        {/* Real Backing — what ACTUALLY mines vs virtual capacity sold */}
+        <div className="admin-card">
+          <h3>Real Backing</h3>
+          {!backing ? (
+            <p className="admin-empty">Loading…</p>
+          ) : (
+            <>
+              <p className="admin-miner">
+                <strong>Virtual</strong> = what players own. <strong>Real rig</strong> = rented hashrate actually mining
+                to the platform wallet. Users' payouts come pro-rata from the real pool earnings.
+              </p>
+              <table className="admin-table">
+                <thead>
+                  <tr>
+                    <th>Coin</th>
+                    <th>Virtual sold</th>
+                    <th>Rigs sold</th>
+                    <th>Real rig</th>
+                    <th>Real rate</th>
+                    <th>Pool unpaid</th>
+                    <th>Mined (pool)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {POOL_KEYS.map((key) => {
+                    const b = backing[key];
+                    if (!b) return null;
+                    const rentals = b.active_rentals || [];
+                    return (
+                      <tr key={key}>
+                        <td>{POOL_LABELS[key] || key}</td>
+                        <td>{Number(b.virtual_ghs).toFixed(2)} GH/s</td>
+                        <td>{b.rigs_sold}</td>
+                        <td title={rentals.map((r) => `${r.rig_name} (rpi ${r.rig_rpi}, ${r.length_hours}h)`).join('\n')}>
+                          {rentals.length > 0 ? rentals.map((r) => `#${r.mrr_rental_id}`).join(', ') : 'none'}
+                        </td>
+                        <td>
+                          {b.real_hash != null ? `${Number(b.real_hash).toFixed(1)} ${b.real_unit}` : 'n/a'}
+                        </td>
+                        <td>
+                          {b.pool_unpaid != null ? `${Number(b.pool_unpaid).toFixed(4)} ${b.pool_unpaid_unit}` : 'n/a'}
+                        </td>
+                        <td>
+                          {Number(b.mined_total) > 0
+                            ? `${Number(b.mined_total).toFixed(4)}${Number(b.mined_2) > 0 ? ` + ${Number(b.mined_2).toFixed(2)} DOGE` : ''}`
+                            : '0'}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              <p className="admin-miner">
+                <strong>Real rate</strong> comes from the pool's own wallet API (ZEC/KAS), the rented rig's live
+                average (LTC), or the Mac miner push (XMR). Refreshes every 60s.
               </p>
             </>
           )}
