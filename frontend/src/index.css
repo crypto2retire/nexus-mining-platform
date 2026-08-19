@@ -313,9 +313,83 @@ button:disabled {
   color: var(--muted, #94a3b8);
 }
 
-.miner-offline {
+.opp-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 0;
+  border-top: 1px solid rgba(148, 163, 184, 0.15);
+  flex-wrap: wrap;
+}
+
+.opp-row.opp-current {
+  background: rgba(52, 211, 153, 0.06);
+  border-radius: 0.5rem;
+  padding: 0.6rem 0.6rem;
+}
+
+.opp-row.opp-unverified {
+  opacity: 0.55;
+}
+
+.opp-main {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 10rem;
+}
+
+.opp-symbol {
+  font-weight: 700;
+  font-size: 1rem;
+}
+
+.opp-name {
   color: var(--muted, #94a3b8);
-  font-size: 0.9rem;
+  font-size: 0.8rem;
+}
+
+.opp-stats {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  flex: 1;
+  justify-content: flex-end;
+}
+
+.opp-stats .stat-label {
+  font-size: 0.7rem;
+  margin-left: 0.5rem;
+}
+
+.opp-stats .stat-label:first-child {
+  margin-left: 0;
+}
+
+.opp-change.up {
+  color: #4ade80;
+  font-size: 0.75rem;
+}
+
+.opp-change.down {
+  color: #f87171;
+  font-size: 0.75rem;
+}
+
+.opp-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.opp-footnote {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid rgba(148, 163, 184, 0.2);
+  font-size: 0.72rem;
+  color: var(--muted, #94a3b8);
 }
 
 .error-banner {

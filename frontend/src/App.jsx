@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import MiningRoomCard from './components/MiningRoomCard';
 import SummaryRow from './components/SummaryRow';
 import LiveMinerPanel from './components/LiveMinerPanel';
+import MiningOpportunities from './components/MiningOpportunities';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 const DEFAULT_WALLET = '0x0000000000000000000000000000000000000001';
@@ -42,6 +43,7 @@ function useAnimatedPending(pendingByPool) {
 
 export default function App() {
   const [wallet, setWallet] = useState(() => localStorage.getItem(STORAGE_KEY) || DEFAULT_WALLET);
+  const [minerStatus, setMinerStatus] = useState(null);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -89,6 +91,22 @@ export default function App() {
 
   useEffect(() => {
     fetchDashboard();
+  }, []);
+
+  // Track the miner's current pool so the opportunities panel can mark ACTIVE.
+  useEffect(() => {
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/miner/status`);
+        if (!res.ok) return;
+        const d = await res.json();
+        if (!cancelled) setMinerStatus(d);
+      } catch { /* miner monitor offline — keep last known */ }
+    };
+    poll();
+    const id = setInterval(poll, 15000);
+    return () => { cancelled = true; clearInterval(id); };
   }, []);
 
   const totalHashrate = useMemo(() => {
@@ -149,6 +167,7 @@ export default function App() {
             />
 
             <LiveMinerPanel />
+            <MiningOpportunities currentPool={minerStatus?.pool} />
 
             <section className="mining-grid">
               {POOLS.map((pool) => (

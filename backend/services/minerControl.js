@@ -65,6 +65,80 @@ function stopLocal() {
   });
 }
 
+/**
+ * Build an XMRig config for a target coin (see coinRegistry) and write it to
+ * ~/xmrig-test/config-<SYMBOL>.json. Returns the config path.
+ */
+function writeCoinConfig(coin) {
+  const fs = require('fs');
+  const wallet = coin.wallet;
+  if (!wallet) throw new Error(`No wallet configured for ${coin.symbol}`);
+  const config = {
+    autosave: false,
+    background: false,
+    colors: false,
+    api: { id: '1', 'worker-id': 'macmini' },
+    cpu: { enabled: true, priority: 1, yield: true },
+    pools: [
+      {
+        algo: coin.algo,
+        coin: coin.coin || null,
+        url: coin.pool,
+        user: wallet,
+        pass: 'x',
+        tls: false,
+      },
+    ],
+    'print-time': 10,
+    'donate-level': 1,
+    http: { enabled: true, host: '127.0.0.1', port: 8080, 'access-token': process.env.XMRIG_API_TOKEN || 'nexus', restricted: false },
+  };
+  if (!config.pools[0].coin) delete config.pools[0].coin;
+  const configPath = path.join(os.homedir(), 'xmrig-test', `config-${coin.symbol.toLowerCase()}.json`);
+  fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+  return configPath;
+}
+
+/** Start the miner with an explicit config path (used by coin switching). */
+function startLocalWithConfig(configPath) {
+  return new Promise((resolve, reject) => {
+    const dir = process.env.XMRIG_DIR || DEFAULT_DIR;
+    const bin = path.join(dir, 'xmrig');
+    if (!fs.existsSync(bin)) {
+      return reject(new Error(`XMRig binary not found at ${bin}`));
+    }
+    const logFd = fs.openSync(LOG_FILE, 'a');
+    const child = spawn(bin, ['-c', configPath], {
+      cwd: dir,
+      detached: true,
+      stdio: ['ignore', logFd, logFd],
+    });
+    child.unref();
+    setTimeout(async () => {
+      try {
+        const running = await isRunning();
+        resolve({ started: running, pid: child.pid });
+      } catch (e) {
+        reject(e);
+      }
+    }, 3000);
+  });
+}
+
+/**
+ * Switch the local miner to a different coin.
+ * Requires a verified pool + configured wallet (caller validates via coinRegistry).
+ */
+async function switchCoin(coin) {
+  const running = await isRunning();
+  if (running) await stopLocal();
+  const configPath = writeCoinConfig(coin);
+  // Small settle so the old process fully releases port 8080.
+  await new Promise((r) => setTimeout(r, 1200));
+  const result = await startLocalWithConfig(configPath);
+  return { ok: true, symbol: coin.symbol, pool: coin.pool, config: configPath, ...result };
+}
+
 /** Start the miner — locally or via the remote control endpoint. */
 async function startMiner() {
   if (process.env.MINER_CONTROL_URL) {
@@ -122,4 +196,4 @@ function authorizeControl(req) {
   return provided && provided === key;
 }
 
-module.exports = { startMiner, stopMiner, startLocal, stopLocal, isRunning, isLocalMiner, authorizeControl, LOG_FILE };
+module.exports = { startMiner, stopMiner, startLocal, stopLocal, switchCoin, writeCoinConfig, isRunning, isLocalMiner, authorizeControl, LOG_FILE };

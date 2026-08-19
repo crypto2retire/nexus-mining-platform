@@ -3,8 +3,10 @@ const { getDashboard } = require('../controllers/dashboardController');
 const { upgradeRig } = require('../controllers/upgradeController');
 const { handleRewardWebhook } = require('../services/rewardDistributor');
 const { getMinerStatus } = require('../services/minerMonitor');
-const { startMiner, stopMiner, authorizeControl } = require('../services/minerControl');
+const { startMiner, stopMiner, authorizeControl, switchCoin } = require('../services/minerControl');
 const { getPoolBalance } = require('../services/poolBalance');
+const { getOpportunities } = require('../services/coinMonitor');
+const { COINS, walletFor, isSwitchable } = require('../services/coinRegistry');
 
 const router = express.Router();
 
@@ -23,6 +25,62 @@ router.get('/miner/status', async (_req, res) => {
 router.get('/miner/balance', async (req, res) => {
   try {
     res.json(await getPoolBalance(req.query.address));
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Mining opportunities — live market monitor, ranked by est. $/day for the M4.
+router.get('/mining/opportunities', async (_req, res) => {
+  try {
+    res.json(await getOpportunities());
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Switch the miner to a different coin (proxy to the machine running XMRig).
+router.post('/miner/switch', async (req, res) => {
+  const symbol = (req.body?.symbol || '').toUpperCase();
+  if (!COINS[symbol]) return res.status(400).json({ ok: false, error: `Unknown coin: ${symbol}` });
+  if (!isSwitchable(symbol)) {
+    return res.status(400).json({
+      ok: false,
+      error: `${symbol} is not switchable: requires a verified pool and a configured wallet (${COINS[symbol].walletEnv}).`,
+    });
+  }
+  try {
+    if (process.env.MINER_CONTROL_URL) {
+      const axios = require('axios');
+      const url = process.env.MINER_CONTROL_URL.replace(/\/$/, '') + '/switch';
+      const r = await axios.post(url, { symbol }, {
+        headers: { 'x-miner-control-key': process.env.MINER_CONTROL_KEY || '' },
+        timeout: 60000,
+      });
+      return res.json(r.data);
+    }
+    // Local mode: run the switch directly.
+    const coin = { ...COINS[symbol], wallet: walletFor(symbol) };
+    res.json(await switchCoin(coin));
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Direct switch endpoint — only valid on the machine that runs the miner.
+router.post('/miner/control/switch', async (req, res) => {
+  if (!authorizeControl(req)) return res.status(403).json({ ok: false, error: 'Forbidden' });
+  const symbol = (req.body?.symbol || '').toUpperCase();
+  if (!COINS[symbol]) return res.status(400).json({ ok: false, error: `Unknown coin: ${symbol}` });
+  if (!isSwitchable(symbol)) {
+    return res.status(400).json({
+      ok: false,
+      error: `${symbol} is not switchable: requires a verified pool and a configured wallet (${COINS[symbol].walletEnv}).`,
+    });
+  }
+  try {
+    const coin = { ...COINS[symbol], wallet: walletFor(symbol) };
+    res.json(await switchCoin(coin));
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }
