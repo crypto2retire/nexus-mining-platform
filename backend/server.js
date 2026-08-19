@@ -4,6 +4,7 @@ const cors = require('cors');
 const path = require('path');
 const apiRouter = require('./routes/api');
 const { startDepositListener } = require('./services/depositListener');
+const { startPayoutTrigger } = require('./services/payoutTrigger');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -36,4 +37,5 @@ if (process.env.NODE_ENV === 'production') {
 app.listen(PORT, () => {
   console.log(`Nexus backend running on port ${PORT}`);
   startDepositListener();
+  startPayoutTrigger();
 });

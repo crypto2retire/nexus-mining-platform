@@ -18,6 +18,23 @@ router.post('/rewards/webhook', handleRewardWebhook);
 router.get('/rewards', getRewards);
 router.post('/rewards/claim', claimRewards);
 router.post('/rewards/withdraw', withdrawRewards);
+// Automatic payout trigger: watch status + manual check (baselines + events).
+router.get('/rewards/payout-status', async (_req, res) => {
+  try {
+    const { getPayoutStatus } = require('../services/payoutTrigger');
+    res.json(await getPayoutStatus());
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+router.post('/rewards/check-payouts', async (_req, res) => {
+  try {
+    const { checkPayouts } = require('../services/payoutTrigger');
+    res.json({ results: await checkPayouts() });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 router.get('/miner/status', async (_req, res) => {
   try {
     res.json(await getMinerStatus());
