@@ -1,6 +1,7 @@
 const axios = require('axios');
 const { pool } = require('../config/db');
 const { contributionsForPool } = require('./rigHistory');
+const { coinsOwnedFor, discountPctFor } = require('./multiCoinDiscount');
 
 const PROTOCOL_FEE_PCT = 0.05;
 
@@ -142,7 +143,11 @@ async function distributePayout(targetPool, totalCryptoReward1, totalNetworkHash
 
       // Average hashrate over the period = hashrate-hours / hours held.
       const avgGhs = periodHours > 0 ? c.contribution / periodHours : 0;
-      const maintenanceUsdc = avgGhs * rateUsdc * periodDays;
+      // Multi-coin loyalty: the more coins a user mines, the lower their
+      // ongoing running cost (2/3/4 coins -> 5/10/15% off maintenance).
+      const coinsOwned = await coinsOwnedFor(client, c.user_id);
+      const maintDiscount = discountPctFor(coinsOwned);
+      const maintenanceUsdc = avgGhs * rateUsdc * periodDays * (1 - maintDiscount / 100);
       const maintenanceCoin =
         coinPrice && maintenanceUsdc > 0 ? maintenanceUsdc / coinPrice : 0;
 

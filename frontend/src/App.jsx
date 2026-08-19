@@ -340,6 +340,7 @@ export default function App() {
                   onReinvest={reinvest}
                   mineAtLoss={data.rigs[pool.key]?.mine_at_loss === true}
                   onToggleLoss={toggleLoss}
+                  discountPct={data.multi_coin?.discount_pct ?? 0}
                 />
               ))}
             </section>

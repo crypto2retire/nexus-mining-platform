@@ -2,6 +2,7 @@ const { pool } = require('../config/db');
 const { getLiveBtcPrice } = require('../services/priceOracle');
 const { logRigChange, resumeDormantRigs } = require('../services/rigHistory');
 const { fetchCoinUsdPrice, claimPoolRewardsInTx } = require('./rewardsController');
+const { coinsOwnedFor, discountPctFor } = require('../services/multiCoinDiscount');
 
 /**
  * Marketplace provider selection. Default = NiceHash. Set
@@ -263,6 +264,8 @@ async function upgradeRig(req, res) {
   let nextTier = null;
   let protocolFeeUsdc = null;
   let spendBtcAmount = null;
+  let discountPct = 0;
+  let discountedCost = null;
 
   try {
     await client.query('BEGIN');
@@ -276,6 +279,10 @@ async function upgradeRig(req, res) {
       return res.status(404).json({ error: 'User not found' });
     }
     userId = userResult.rows[0].user_id;
+
+    // Multi-coin loyalty: more coins mined = cheaper everything.
+    const coinsOwned = await coinsOwnedFor(client, userId);
+    discountPct = discountPctFor(coinsOwned);
 
     const walletResult = await client.query(
       'SELECT wallet_id, usdc_balance FROM user_wallets WHERE user_id = $1 FOR UPDATE',
@@ -296,13 +303,14 @@ async function upgradeRig(req, res) {
       await client.query('ROLLBACK');
       return res.status(400).json({ error: 'Already at max level' });
     }
-    if (Number(wallet.usdc_balance) < nextTier.cost) {
+    discountedCost = toSatPrecision(nextTier.cost * (1 - discountPct / 100));
+    if (Number(wallet.usdc_balance) < discountedCost) {
       await client.query('ROLLBACK');
       return res.status(400).json({ error: 'Insufficient USDC balance' });
     }
 
-    protocolFeeUsdc = toSatPrecision(nextTier.cost * PROTOCOL_FEE_PCT);
-    const netPurchaseUsdc = toSatPrecision(nextTier.cost - protocolFeeUsdc);
+    protocolFeeUsdc = toSatPrecision(discountedCost * PROTOCOL_FEE_PCT);
+    const netPurchaseUsdc = toSatPrecision(discountedCost - protocolFeeUsdc);
     spendBtcAmount = toSatPrecision(netPurchaseUsdc / btcSpotPrice);
 
     // Reserve the request_id with a PENDING order row. ON CONFLICT DO NOTHING
@@ -318,7 +326,7 @@ async function upgradeRig(req, res) {
         userId,
         targetPool,
         requestId,
-        nextTier.cost,
+        discountedCost,
         protocolFeeUsdc,
         spendBtcAmount,
         toSatPrecision(btcSpotPrice),
@@ -336,8 +344,8 @@ async function upgradeRig(req, res) {
     }
     orderRecordId = orderInsert.rows[0].order_id;
 
-    // Deduct the user's USDC balance.
-    newBalance = toSatPrecision(Number(wallet.usdc_balance) - nextTier.cost);
+    // Deduct the user's USDC balance (post-discount price).
+    newBalance = toSatPrecision(Number(wallet.usdc_balance) - discountedCost);
     await client.query(
       'UPDATE user_wallets SET usdc_balance = $1, updated_at = CURRENT_TIMESTAMP WHERE wallet_id = $2',
       [newBalance, walletId]
@@ -390,7 +398,7 @@ async function upgradeRig(req, res) {
       await refundClient.query('BEGIN');
       await refundClient.query(
         'UPDATE user_wallets SET usdc_balance = usdc_balance + $1, updated_at = CURRENT_TIMESTAMP WHERE wallet_id = $2',
-        [nextTier.cost, walletId]
+        [discountedCost, walletId]
       );
       await refundClient.query(
         `UPDATE hashrate_orders SET status = 'REFUNDED', failure_reason = $1, updated_at = CURRENT_TIMESTAMP WHERE order_id = $2`,
@@ -503,6 +511,8 @@ async function upgradeRig(req, res) {
     duplicated: false,
     level: nextTier.level,
     hashrate: nextTier.hashrate,
+    discount_pct: discountPct,
+    discounted_cost: discountedCost,
     remaining_balance: newBalance,
     btc_spent: spendBtcAmount,
     btc_spot_price: toSatPrecision(btcSpotPrice),

@@ -1,6 +1,7 @@
 const { pool } = require('../config/db');
 const { isAdminWallet } = require('../middleware/adminAuth');
 const { tiersFor } = require('./upgradeController');
+const { coinsOwnedFor, discountPctFor } = require('../services/multiCoinDiscount');
 
 /**
  * The zero address is a burn address — real USDC sent there is unrecoverable.
@@ -92,6 +93,8 @@ async function getDashboard(req, res) {
         pendingByPool[row.target_pool] = Number(row.pending_reward_1);
       }
 
+      const coinsOwned = await coinsOwnedFor(client, userId);
+
       return res.json({
         user_id: userId,
         wallet_address: walletAddress,
@@ -100,6 +103,7 @@ async function getDashboard(req, res) {
         upgrade_cost: upgradeCostByPool,
         maintenance_rate: maintenanceRateByPool,
         pending_rewards: pendingByPool,
+        multi_coin: { coins_owned: coinsOwned, discount_pct: discountPctFor(coinsOwned) },
         is_admin: isAdminWallet(walletAddress),
         // Never expose a missing/zero-address treasury — the zero address is a
         // burn address and players would lose real USDC sending to it.

@@ -44,7 +44,7 @@ afterEach(() => {
 
 // ---- distributePayout: maintenance deduction + dormancy -------------------
 
-function distributionClient({ rate = 0.006, price = 0.05, hasHistory = true, mineAtLoss = false, usdcBalance = '10.0000' } = {}) {
+function distributionClient({ rate = 0.006, price = 0.05, hasHistory = true, mineAtLoss = false, usdcBalance = '10.0000', coins = 0 } = {}) {
   const now = Date.now();
   const start = new Date(now - 24 * 3600 * 1000); // 24h period
   const client = {
@@ -59,6 +59,9 @@ function distributionClient({ rate = 0.006, price = 0.05, hasHistory = true, min
           : { rowCount: 0, rows: [] };
       }
       if (sql.includes('SELECT user_id, virtual_hashrate FROM virtual_rigs')) return { rowCount: 0, rows: [] };
+      if (sql.includes('SELECT COUNT(*) AS c FROM virtual_rigs')) {
+        return { rowCount: 1, rows: [{ c: String(coins) }] };
+      }
       if (sql.includes('SELECT usdc_per_ghs_per_day FROM pool_maintenance_rates')) {
         return { rowCount: 1, rows: [{ usdc_per_ghs_per_day: String(rate) }] };
       }
@@ -149,6 +152,35 @@ describe('distributePayout — GoMiner maintenance', () => {
     const dormancy = client.query.mock.calls.find(([sql]) => sql.includes("maintenance_status = 'DORMANT'"));
     expect(dormancy).toBeFalsy();
     warn.mockRestore();
+  });
+});
+
+// ---- distributePayout: multi-coin maintenance discount --------------------
+
+describe('distributePayout — multi-coin discount', () => {
+  test('2 coins → 5% lower maintenance (lower ongoing cost)', async () => {
+    const client = distributionClient({ rate: 0.006, price: 0.05, coins: 2 });
+    // 25 GH/s × 1 day → maintenance 3 KAS full, 2.85 KAS with 5% off.
+    await distributePayout('KASPA', 100, 1000);
+
+    const ledgerInsert = client.query.mock.calls.find(([sql]) => sql.includes('INSERT INTO user_rewards_ledger'));
+    expect(Number(ledgerInsert[1][7])).toBeCloseTo(2.85, 6); // maintenance 5% off
+    expect(Number(ledgerInsert[1][2])).toBeCloseTo(92.15, 6); // net = 95 - 2.85
+
+    const maintLedger = client.query.mock.calls.find(([sql]) => sql.includes('INSERT INTO maintenance_fee_ledger'));
+    expect(Number(maintLedger[1][5])).toBeCloseTo(0.1425, 6); // 2.85 × $0.05
+  });
+
+  test('4 coins → 15% off maintenance; no discount at 0-1 coins', async () => {
+    const client4 = distributionClient({ rate: 0.006, price: 0.05, coins: 4 });
+    await distributePayout('KASPA', 100, 1000);
+    const ledger4 = client4.query.mock.calls.find(([sql]) => sql.includes('INSERT INTO user_rewards_ledger'));
+    expect(Number(ledger4[1][7])).toBeCloseTo(2.55, 6); // 3 × 0.85
+
+    const client0 = distributionClient({ rate: 0.006, price: 0.05, coins: 0 });
+    await distributePayout('KASPA', 100, 1000);
+    const ledger0 = client0.query.mock.calls.find(([sql]) => sql.includes('INSERT INTO user_rewards_ledger'));
+    expect(Number(ledger0[1][7])).toBeCloseTo(3, 6); // full maintenance
   });
 });
 

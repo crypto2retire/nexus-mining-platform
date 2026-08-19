@@ -10,7 +10,7 @@ const COIN_NAMES = {
 export default function MiningRoomCard({
   title, pool, rig, pendingReward, upgradeCost,
   maintenanceRate, onUpgrade, onClaim, onWithdraw, onReinvest,
-  mineAtLoss, onToggleLoss,
+  mineAtLoss, onToggleLoss, discountPct,
 }) {
   const [animating, setAnimating] = useState(false);
   const level = Number(rig?.level) || 1;
@@ -78,9 +78,15 @@ export default function MiningRoomCard({
           className={`btn-primary ${animating ? 'pulse' : ''}`}
           onClick={() => pulse(() => onUpgrade(pool))}
           disabled={level >= 5}
-          title={upgradeCost ? `Upgrade to level ${level + 1} — $${upgradeCost}` : 'Max level reached'}
+          title={
+            upgradeCost
+              ? `Buy a miner for ${COIN_NAMES[pool] || pool} (level ${level + 1})${discountPct > 0 ? ` — ${discountPct}% multi-coin discount applied` : ''}`
+              : 'Max level reached'
+          }
         >
-          {level >= 5 ? 'Max Level' : `Upgrade Rig — $${upgradeCost ?? '—'}`}
+          {level >= 5
+            ? 'Max Level'
+            : `${rig ? 'Upgrade Rig' : 'Buy Miner'} — $${upgradeCost ?? '—'}${discountPct > 0 ? ` (${discountPct}% off)` : ''}`}
         </button>
         <button
           className="btn-secondary"

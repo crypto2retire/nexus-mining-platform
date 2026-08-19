@@ -27,13 +27,16 @@ const { upgradeRig } = require('../controllers/upgradeController');
 const REAL_ENV = { ...process.env };
 const WALLET = '0x1111111111111111111111111111111111111111';
 
-function makeClient({ balance = 1000, hasRig = false } = {}) {
+function makeClient({ balance = 1000, hasRig = false, coins = 0 } = {}) {
   const queries = [];
   const client = {
     query: jest.fn(async (sql, params = []) => {
       queries.push({ sql, params });
       if (sql.includes('SELECT user_id FROM users')) {
         return { rowCount: 1, rows: [{ user_id: 'user-1' }] };
+      }
+      if (sql.includes('SELECT COUNT(*) AS c FROM virtual_rigs')) {
+        return { rowCount: 1, rows: [{ c: String(coins) }] };
       }
       if (sql.includes('SELECT wallet_id, usdc_balance')) {
         return { rowCount: 1, rows: [{ wallet_id: 'wallet-1', usdc_balance: balance }] };
@@ -144,6 +147,42 @@ describe('upgradeRig — currency conversion + order loop', () => {
     const finalUpdate = pool.query.mock.calls.find(([sql]) => sql.includes('UPDATE hashrate_orders'));
     expect(finalUpdate[1][0]).toBe('sandbox-abc');
     expect(finalUpdate[1][1]).toBe('SIMULATED');
+  });
+
+  test('multi-coin discount: 2 coins → 5% off the purchase, fee and spend scale down', async () => {
+    const { client } = makeClient({ coins: 2 });
+    pool.connect.mockResolvedValue(client);
+
+    const res = makeRes();
+    await upgradeRig(req(), res);
+
+    expect(res.body.success).toBe(true);
+    // ZCASH tier 1→2 = $20 → 5% off = $19. Fee 5% = 0.95. Net 18.05 / 100000 BTC.
+    expect(res.body.discount_pct).toBe(5);
+    expect(res.body.discounted_cost).toBe(19);
+    expect(res.body.protocol_fee_usdc).toBe(0.95);
+    expect(res.body.btc_spent).toBe(0.0001805);
+
+    // Balance deducted the discounted price: 1000 - 19 = 981.
+    const balanceUpdate = client.query.mock.calls.find(([sql]) => sql.includes('UPDATE user_wallets'));
+    expect(balanceUpdate[1][0]).toBe(981);
+
+    // Order row books the discounted cost.
+    const orderInsert = client.query.mock.calls.find(([sql]) => sql.includes('INSERT INTO hashrate_orders'));
+    expect(orderInsert[1][3]).toBe(19);
+  });
+
+  test('4 coins → 15% off (max ladder rung)', async () => {
+    const { client } = makeClient({ coins: 4 });
+    pool.connect.mockResolvedValue(client);
+
+    const res = makeRes();
+    await upgradeRig(req(), res);
+
+    // $20 → $17. Fee 5% = 0.85. Net 16.15 → 0.0001615 BTC.
+    expect(res.body.discount_pct).toBe(15);
+    expect(res.body.discounted_cost).toBe(17);
+    expect(res.body.btc_spent).toBe(0.0001615);
   });
 
   test('insufficient balance: 400, no order placed, no deduction', async () => {
