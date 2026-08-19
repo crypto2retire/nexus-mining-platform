@@ -50,21 +50,15 @@ async function getMinerStatus() {
   const cached = getCachedStatus();
   if (cached) {
     const age = Date.now() - (cached.pushed_at || 0);
-    if (age <= PUSH_STALE_MS) {
-      // Fresh push — live data.
-      return {
-        ...cached,
-        online: true,
-        stale: false,
-        last_seen_seconds: Math.round(age / 1000),
-      };
-    }
-    // Stale push — last-known-good, flagged. Dashboard shows it as
-    // "STALE · Ns ago" instead of a false OFFLINE.
+    const stale = age > PUSH_STALE_MS;
+    // Respect the pushed online flag: a pushed {online:false} means the Mac
+    // explicitly reported the miner stopped/crashed — that stays OFFLINE
+    // (stale or not). STALE only softens a pushed online:true into
+    // "last-known-good" when the agent itself has gone quiet.
     return {
       ...cached,
-      online: true,
-      stale: true,
+      online: cached.online !== false,
+      stale,
       last_seen_seconds: Math.round(age / 1000),
     };
   }

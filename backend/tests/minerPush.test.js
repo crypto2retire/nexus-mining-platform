@@ -74,6 +74,16 @@ describe('minerMonitor status freshness', () => {
     expect(status.hashrate_10s).toBe(321);
   });
 
+  it('keeps an explicitly-pushed offline as OFFLINE (honest stop)', async () => {
+    // The Mac pushes {online:false} when XMRig is stopped/crashed — the
+    // dashboard must show OFFLINE, not last-known-good.
+    pushStatus({ online: false, error: 'ECONNREFUSED', fetched_at: Date.now() });
+    nowSpy.mockReturnValue(now + PUSH_STALE_MS + 30000); // even when stale
+    const status = await getMinerStatus();
+    expect(status.online).toBe(false);
+    expect(status.error).toBe('ECONNREFUSED');
+  });
+
   it('falls back to a direct fetch when no push has ever arrived', async () => {
     // A fresh module instance has an empty cache (pushStatus(undefined) would
     // still create a cache entry — pushed_at only). isolateModules resets the

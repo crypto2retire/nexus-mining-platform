@@ -54,14 +54,20 @@ function mapSummary(d) {
 }
 
 async function pushStatus() {
+  let payload;
   try {
     const headers = TOKEN ? { Authorization: `Bearer ${TOKEN}` } : {};
     const r = await axios.get(STATUS_URL, { headers, timeout: 5000 });
-    const payload = mapSummary(r.data);
+    payload = mapSummary(r.data);
+  } catch (err) {
+    // XMRig unreachable (stopped/crashed) — tell the droplet explicitly so the
+    // panel shows a HONEST OFFLINE instead of a stale last-known-good.
+    payload = { online: false, source: 'push', error: err.code || err.message, fetched_at: Date.now() };
+  }
+  try {
     await axios.post(`${DROPLET}/api/miner/push`, payload, { headers: PUSH_HEADERS, timeout: 8000 });
   } catch (err) {
-    // Don't spam the log every 15s while the miner is simply stopped —
-    // only log when the LOCAL status call itself fails.
+    // Only log when the push TO THE DROPLET fails (agent unreachable).
     log('status push failed:', err.code || err.message);
   }
 }
