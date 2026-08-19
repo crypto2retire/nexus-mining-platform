@@ -6,7 +6,23 @@ const USDC_ABI = [
   'event Transfer(address indexed from, address indexed to, uint256 value)',
 ];
 
+// Polling cadence + startup lookback. Base has ~2s blocks; 200 blocks ≈ 6-7 min
+// of history, so deposits made while the service was down are caught on boot.
+const POLL_INTERVAL_MS = Number(process.env.DEPOSIT_POLL_INTERVAL_MS || 30000);
+const LOOKBACK_BLOCKS_ON_START = Number(process.env.DEPOSIT_LOOKBACK_BLOCKS || 200);
+
 let listenerStarted = false;
+let pollingTimer = null;
+
+/**
+ * The zero address is a burn address — real USDC sent there is unrecoverable.
+ * The platform treasury must be a real wallet the operator controls. Until it
+ * is, deposits are NOT exposed in the UI and NOT credited by the listener.
+ */
+function isSafeTreasury() {
+  const t = (process.env.PLATFORM_TREASURY_WALLET || '').toLowerCase();
+  return /^0x[a-f0-9]{40}$/.test(t) && t !== '0x0000000000000000000000000000000000000000';
+}
 
 async function ensureUser(client, walletAddress) {
   const clean = walletAddress.toLowerCase();
@@ -74,6 +90,14 @@ async function processDeposit(from, to, value, txHash) {
   }
 }
 
+/**
+ * Polls Base for USDC Transfer events to the treasury using eth_getLogs.
+ *
+ * WHY NOT eth_newFilter/on(): public JSON-RPC endpoints (mainnet.base.org etc.)
+ * are load-balanced and drop filter state — eth_getFilterChanges returns
+ * "filter not found" within seconds (hit 2026-08-19). eth_getLogs with an
+ * explicit block range has no server-side state and works on any RPC.
+ */
 function startDepositListener() {
   if (listenerStarted) return;
   listenerStarted = true;
@@ -83,16 +107,57 @@ function startDepositListener() {
     console.warn('BASE_RPC_URL not set; deposit listener inactive');
     return;
   }
+  if (!isSafeTreasury()) {
+    console.error('❌ PLATFORM_TREASURY_WALLET missing or zero address — deposit listener inactive (burn-address protection)');
+    return;
+  }
+  const treasury = (process.env.PLATFORM_TREASURY_WALLET || '').toLowerCase();
 
   const provider = new ethers.JsonRpcProvider(rpcUrl);
   const usdc = new ethers.Contract(USDC_CONTRACT, USDC_ABI, provider);
+  const transferTopic = ethers.id('Transfer(address,address,uint256)');
+  // topics[2] = the `to` address, left-padded to 32 bytes for the indexed param.
+  const toTopic = ethers.zeroPadValue(treasury, 32);
 
-  const filter = usdc.filters.Transfer(null, process.env.PLATFORM_TREASURY_WALLET);
-  usdc.on(filter, async (from, to, value, event) => {
-    await processDeposit(from, to, value, event.log.transactionHash);
-  });
+  let lastBlock = 0;
 
-  console.log('Deposit listener started on Base USDC Transfer events');
+  const poll = async () => {
+    try {
+      const latest = await provider.getBlockNumber();
+      if (lastBlock === 0) {
+        // Startup lookback: catch deposits made while we were down.
+        lastBlock = Math.max(0, latest - LOOKBACK_BLOCKS_ON_START);
+      }
+      if (latest <= lastBlock) return;
+
+      const fromBlock = lastBlock + 1;
+      const logs = await provider.getLogs({
+        address: USDC_CONTRACT,
+        topics: [transferTopic, null, toTopic],
+        fromBlock,
+        toBlock: latest,
+      });
+      lastBlock = latest;
+
+      for (const log of logs) {
+        try {
+          const parsed = usdc.interface.parseLog({ topics: log.topics, data: log.data });
+          if (!parsed) continue;
+          await processDeposit(parsed.args.from, parsed.args.to, parsed.args.value, log.transactionHash);
+        } catch (err) {
+          console.error('Deposit parse/process error:', err.message);
+        }
+      }
+    } catch (err) {
+      // RPC hiccup — do NOT advance the cursor; retry next tick.
+      console.error('Deposit poll error (retrying next tick):', err.message);
+    }
+  };
+
+  // Fire immediately, then on an interval.
+  poll();
+  pollingTimer = setInterval(poll, POLL_INTERVAL_MS);
+  console.log(`Deposit listener started (eth_getLogs poll every ${POLL_INTERVAL_MS / 1000}s, lookback ${LOOKBACK_BLOCKS_ON_START} blocks)`);
 }
 
 module.exports = { startDepositListener };
