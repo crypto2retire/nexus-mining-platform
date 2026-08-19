@@ -1,22 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import MiningRoomCard from './components/MiningRoomCard';
 import SummaryRow from './components/SummaryRow';
-import LiveMinerPanel from './components/LiveMinerPanel';
-import MiningOpportunities from './components/MiningOpportunities';
 import GetStarted from './components/GetStarted';
 import AdminPanel from './components/AdminPanel';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 const STORAGE_KEY = 'nexus.wallet';
 // Nexus accounts are Ethereum-style addresses only (MetaMask / Coinbase Wallet /
-// Trust Wallet). Mining addresses (Monero, Zcash, Kaspa, Bitcoin) are NOT valid.
+// Trust Wallet). Mining addresses (Zcash, Kaspa, Bitcoin) are NOT valid.
 const VALID_WALLET_RE = /^0x[a-f0-9]{40}$/i;
 
 const POOLS = [
   { key: 'ZCASH', title: 'Zcash (ZEC) Mine' },
   { key: 'KASPA', title: 'Kaspa (KAS) Mine' },
   { key: 'LTC_DOGE', title: 'Litecoin / Dogecoin Merge' },
-  { key: 'XMR', title: 'Monero (XMR) Mine' },
 ];
 
 function useAnimatedPending(pendingByPool) {
@@ -223,22 +220,6 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Track the miner's current pool so the opportunities panel can mark ACTIVE.
-  useEffect(() => {
-    let cancelled = false;
-    const poll = async () => {
-      try {
-        const res = await fetch(`${API_BASE}/api/miner/status`);
-        if (!res.ok) return;
-        const d = await res.json();
-        if (!cancelled) setMinerStatus(d);
-      } catch { /* miner monitor offline — keep last known */ }
-    };
-    poll();
-    const id = setInterval(poll, 15000);
-    return () => { cancelled = true; clearInterval(id); };
-  }, []);
-
   const totalHashrate = useMemo(() => {
     if (!data) return 0;
     return POOLS.reduce((sum, p) => sum + (Number(data.rigs[p.key]?.virtual_hashrate) || 0), 0);
@@ -318,9 +299,6 @@ export default function App() {
             />
 
             <GetStarted depositAddress={data.deposit_address} />
-
-            <LiveMinerPanel isAdmin={!!data.is_admin} wallet={wallet} />
-            <MiningOpportunities currentPool={minerStatus?.pool} isAdmin={!!data.is_admin} wallet={wallet} />
 
             {data.is_admin && <AdminPanel wallet={wallet} />}
 

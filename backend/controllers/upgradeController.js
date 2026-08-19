@@ -22,19 +22,14 @@ function getRenter() {
  * that hashrate on the marketplace (rental $/day differs hugely per coin).
  * Virtual hashrate ladder is the same everywhere; only the price differs.
  *
- *   KASPA/XMR (cheap to back):   $5 / $10 / $25 / $50
+ *   KASPA (cheap to back):       $5 / $10 / $25 / $50
  *   ZCASH (mid):                 $20 / $40 / $100 / $200
  *   LTC_DOGE (expensive rigs):   $50 / $120 / $300 / $750
+ *
+ * (XMR self-mined demo pool REMOVED 2026-08-19 — no XMR room.)
  */
 const POOL_TIERS = {
   KASPA: [
-    { level: 1, cost: 0, hashrate: 10 },
-    { level: 2, cost: 5, hashrate: 25 },
-    { level: 3, cost: 10, hashrate: 60 },
-    { level: 4, cost: 25, hashrate: 150 },
-    { level: 5, cost: 50, hashrate: 400 },
-  ],
-  XMR: [
     { level: 1, cost: 0, hashrate: 10 },
     { level: 2, cost: 5, hashrate: 25 },
     { level: 3, cost: 10, hashrate: 60 },
@@ -99,107 +94,6 @@ function duplicateResponse(row) {
   };
 }
 
-/**
- * Self-mined pool upgrade (XMR): no marketplace order, no USDC charge.
- * Records a SELF_MINING order row (idempotent on request_id) and levels the rig.
- */
-async function upgradeSelfMinedRig(req, res) {
-  const walletAddress = (req.body.wallet || '').toLowerCase();
-  const targetPool = req.body.target_pool;
-  const requestId = String(req.body.request_id || '').trim();
-
-  if (targetPool !== 'XMR') {
-    return res.status(400).json({ error: 'Self-mined upgrades are only available for XMR' });
-  }
-
-  const existing = await pool.query(`${ORDER_SELECT} WHERE h.request_id = $1`, [requestId]);
-  if (existing.rowCount > 0) {
-    return res.json(duplicateResponse(existing.rows[0]));
-  }
-
-  const client = await pool.connect();
-  let nextTier = null;
-  try {
-    await client.query('BEGIN');
-
-    const userResult = await client.query(
-      'SELECT user_id FROM users WHERE LOWER(wallet_address) = $1 FOR UPDATE',
-      [walletAddress]
-    );
-    if (userResult.rowCount === 0) {
-      await client.query('ROLLBACK');
-      return res.status(404).json({ error: 'User not found' });
-    }
-    const userId = userResult.rows[0].user_id;
-
-    const rigResult = await client.query(
-      'SELECT rig_id, level, virtual_hashrate FROM virtual_rigs WHERE user_id = $1 AND target_pool = $2 FOR UPDATE',
-      [userId, targetPool]
-    );
-    const rig = rigResult.rows[0];
-    const currentLevel = rig ? rig.level : 1;
-
-    nextTier = tiersFor(targetPool).find((t) => t.level === currentLevel + 1);
-    if (!nextTier) {
-      await client.query('ROLLBACK');
-      return res.status(400).json({ error: 'Already at max level' });
-    }
-
-    const orderInsert = await client.query(
-      `INSERT INTO hashrate_orders
-         (user_id, target_pool, request_id, usdc_cost, protocol_fee_usdc, btc_spent,
-          btc_spot_price, price_feed, price_is_usdc_pair, algorithm, status, marketplace)
-       VALUES ($1, $2, $3, 0, 0, 0, 0, 'self-mined', false, 'RANDOMX', 'SELF_MINING', 'SELF-MINED')
-       ON CONFLICT (request_id) DO NOTHING
-       RETURNING order_id`,
-      [userId, targetPool, requestId]
-    );
-    if (orderInsert.rowCount === 0) {
-      await client.query('ROLLBACK');
-      const winner = await pool.query(`${ORDER_SELECT} WHERE h.request_id = $1`, [requestId]);
-      return res.json(duplicateResponse(winner.rows[0]));
-    }
-
-    if (rig) {
-      await client.query(
-        'UPDATE virtual_rigs SET level = $1, virtual_hashrate = $2, maintenance_status = $3, updated_at = CURRENT_TIMESTAMP WHERE rig_id = $4',
-        [nextTier.level, nextTier.hashrate, 'ACTIVE', rig.rig_id]
-      );
-    } else {
-      await client.query(
-        'INSERT INTO virtual_rigs (user_id, target_pool, virtual_hashrate, level, maintenance_status) VALUES ($1, $2, $3, $4, $5)',
-        [userId, targetPool, nextTier.hashrate, nextTier.level, 'ACTIVE']
-      );
-    }
-    await logRigChange(client, userId, targetPool, nextTier.hashrate);
-    await resumeDormantRigs(client, userId);
-
-    await client.query('COMMIT');
-  } catch (err) {
-    await client.query('ROLLBACK');
-    console.error('Self-mined upgrade error:', err);
-    return res.status(500).json({ error: err.message || 'Internal server error' });
-  } finally {
-    client.release();
-  }
-
-  return res.json({
-    success: true,
-    duplicated: false,
-    level: nextTier.level,
-    hashrate: nextTier.hashrate,
-    remaining_balance: null,
-    btc_spent: 0,
-    btc_spot_price: null,
-    protocol_fee_usdc: 0,
-    nicehash_order_id: null,
-    order_status: 'SELF_MINING',
-    sandbox: false,
-    request_id: requestId,
-    note: 'Self-mined pool — no marketplace order placed, no USDC charged.',
-  });
-}
-
 async function upgradeRig(req, res) {
   const walletAddress = (req.body.wallet || '').toLowerCase();
   const targetPool = req.body.target_pool;
@@ -210,12 +104,6 @@ async function upgradeRig(req, res) {
   }
   if (!requestId || requestId.length > 64) {
     return res.status(400).json({ error: 'request_id is required (1-64 chars) for idempotent upgrades' });
-  }
-
-  // XMR is a SELF-MINED pool (operator-owned hardware) — no NiceHash order,
-  // no USDC charge. Handled by its own idempotent flow.
-  if (targetPool === 'XMR') {
-    return upgradeSelfMinedRig(req, res);
   }
 
   if (!['ZCASH', 'KASPA', 'LTC_DOGE'].includes(targetPool)) {
@@ -575,10 +463,6 @@ async function reinvestRig(req, res) {
     return res.status(400).json({ error: 'request_id is required (1-64 chars) for idempotent upgrades' });
   }
 
-  // XMR upgrades are SELF-MINED and free — nothing to reinvest.
-  if (targetPool === 'XMR') {
-    return upgradeRig(req, res);
-  }
   if (!['ZCASH', 'KASPA', 'LTC_DOGE'].includes(targetPool)) {
     return res.status(400).json({ error: 'Invalid target pool' });
   }
@@ -676,7 +560,7 @@ async function setMineAtLoss(req, res) {
   if (!walletAddress || !/^0x[a-f0-9]{40}$/i.test(walletAddress)) {
     return res.status(400).json({ error: 'Valid wallet address is required' });
   }
-  if (!['ZCASH', 'KASPA', 'LTC_DOGE', 'XMR'].includes(targetPool)) {
+  if (!['ZCASH', 'KASPA', 'LTC_DOGE'].includes(targetPool)) {
     return res.status(400).json({ error: 'Invalid target pool' });
   }
 

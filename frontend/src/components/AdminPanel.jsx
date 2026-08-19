@@ -6,10 +6,9 @@ const POOL_LABELS = {
   ZCASH: 'ZEC',
   KASPA: 'KAS',
   LTC_DOGE: 'LTC/DOGE',
-  XMR: 'XMR',
 };
 
-const POOL_KEYS = ['ZCASH', 'KASPA', 'LTC_DOGE', 'XMR'];
+const POOL_KEYS = ['ZCASH', 'KASPA', 'LTC_DOGE'];
 
 /**
  * Operator-only panel. Rendered only when the connected wallet is on the

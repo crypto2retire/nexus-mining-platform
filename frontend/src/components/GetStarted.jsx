@@ -19,7 +19,7 @@ export default function GetStarted({ depositAddress }) {
           <h3>How to start mining with Nexus</h3>
           <p className="get-started-intro">
             Nexus pays out a share of <strong>real</strong> mining rewards (Zcash, Kaspa, Litecoin/
-            Dogecoin, Monero) based on the hashrate you own. Here's how to set up your account:
+            Dogecoin) based on the hashrate you own. Here's how to set up your account:
           </p>
 
           <ol className="get-started-steps">

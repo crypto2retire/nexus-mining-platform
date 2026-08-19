@@ -286,7 +286,7 @@ describe('setMineAtLoss — OK-at-a-loss toggle', () => {
   test('404 when the pool has no rig yet', async () => {
     pool.query.mockResolvedValueOnce({ rowCount: 0, rows: [] });
     const res = makeRes();
-    await setMineAtLoss({ body: { wallet: WALLET, target_pool: 'XMR', enabled: true } }, res);
+    await setMineAtLoss({ body: { wallet: WALLET, target_pool: 'KASPA', enabled: true } }, res);
     expect(res.statusCode).toBe(404);
   });
 
@@ -387,14 +387,6 @@ describe('reinvestRig — GoMiner reinvest', () => {
     expect(res.body.duplicated).toBe(true);
     expect(pool.connect).not.toHaveBeenCalled();
     expect(placeHashpowerOrder).not.toHaveBeenCalled();
-  });
-
-  test('XMR reinvest falls through to the free self-mined upgrade', async () => {
-    const res = makeRes();
-    await reinvestRig({ body: { wallet: WALLET, target_pool: 'XMR', request_id: 'reinvest-4' } }, res);
-    expect(res.body.success).toBe(true);
-    expect(res.body.order_status).toBe('SELF_MINING');
-    expect(res.body.btc_spent).toBe(0);
   });
 
   test('rejects invalid wallets and unknown pools', async () => {

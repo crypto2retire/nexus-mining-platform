@@ -52,7 +52,7 @@ async function getDashboard(req, res) {
       );
       const rates = await client.query('SELECT pool, usdc_per_ghs_per_day FROM pool_maintenance_rates');
 
-      const pools = ['ZCASH', 'KASPA', 'LTC_DOGE', 'XMR'];
+      const pools = ['ZCASH', 'KASPA', 'LTC_DOGE'];
       const rigsByPool = {};
       const upgradeCostByPool = {};
       const maintenanceRateByPool = {};

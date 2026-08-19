@@ -22,7 +22,6 @@ const POOL_COINGECKO = {
   ZCASH: 'zcash',
   KASPA: 'kaspa',
   LTC_DOGE: 'litecoin',
-  XMR: 'monero',
   // Synthetic key: the DOGE side of the LTC_DOGE merged pool.
   LTC_DOGE_DOGE: 'dogecoin',
 };
@@ -350,7 +349,7 @@ async function handleRewardWebhook(req, res) {
   }
 
   const { target_pool, total_crypto_reward_1, total_network_hashrate } = req.body || {};
-  if (!['ZCASH', 'KASPA', 'LTC_DOGE', 'XMR'].includes(target_pool)) {
+  if (!['ZCASH', 'KASPA', 'LTC_DOGE'].includes(target_pool)) {
     return res.status(400).json({ error: 'Invalid target_pool' });
   }
   if (typeof total_crypto_reward_1 !== 'number' || total_crypto_reward_1 <= 0) {

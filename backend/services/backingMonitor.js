@@ -1,7 +1,6 @@
 const axios = require('axios');
 const { pool } = require('../config/db');
 const { WATCHES } = require('./payoutTrigger');
-const { getMinerStatus } = require('./minerMonitor');
 const { getOrderStatus } = require('./mrrRenter');
 
 /**
@@ -12,21 +11,23 @@ const { getOrderStatus } = require('./mrrRenter');
  *   active_rentals           — real MRR rentals currently running (rig_rentals)
  *   real_hash / real_unit    — measured hashrate landing at the pool wallet
  *                              (2Miners currentHashrate for ZEC/KAS; MRR rental
- *                              average for LTC; the Mac push for XMR)
+ *                              average for LTC)
  *   pool_unpaid              — unpaid balance sitting at the pool (display units)
  *   mined_total / mined_2    — real payouts received (real_pool_payouts)
+ *
+ * (The XMR self-mined demo pool was REMOVED 2026-08-19 — no XMR entry.)
  *
  * All live fetches are cached 60s so the admin panel never hammers pools.
  * A failed live fetch degrades to nulls — the panel must never block.
  */
 
 const TTL_MS = 60000;
-const POOLS = ['ZCASH', 'KASPA', 'LTC_DOGE', 'XMR'];
+const POOLS = ['ZCASH', 'KASPA', 'LTC_DOGE'];
 
 // Display unit per pool for real hashrate (natural scale).
-const REAL_UNITS = { ZCASH: 'KH/s', KASPA: 'GH/s', LTC_DOGE: 'GH/s', XMR: 'kH/s' };
+const REAL_UNITS = { ZCASH: 'KH/s', KASPA: 'GH/s', LTC_DOGE: 'GH/s' };
 // Pool balances come back in smallest units — scale for display.
-const POOL_DECIMALS = { ZCASH: 8, KASPA: 8, LTC_DOGE: 8, XMR: 12 };
+const POOL_DECIMALS = { ZCASH: 8, KASPA: 8, LTC_DOGE: 8 };
 
 let cache = null;
 let cacheAt = 0;
@@ -66,12 +67,6 @@ async function rentalRealGhs(mrrRentalId) {
 }
 
 async function liveRealHash(pool, activeRentals) {
-  if (pool === 'XMR') {
-    // Defensive: getMinerStatus may not return a thenable (unmocked in tests).
-    const s = await Promise.resolve(getMinerStatus()).catch(() => null);
-    const h = s?.hashrate_10s;
-    return h != null ? h / 1000 : null; // H/s -> kH/s
-  }
   if (pool === 'LTC_DOGE') {
     // F2Pool can't look up bech32 workers — use the rented rigs' live average.
     let total = 0;

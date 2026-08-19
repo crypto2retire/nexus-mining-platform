@@ -4,21 +4,6 @@ jest.mock('../config/db', () => ({
 
 const { computePayoutEvent, WATCHES } = require('../services/payoutTrigger');
 
-describe('XMR watch (unpaid-drop)', () => {
-  test('reads unpaid balance from stats.balance; string unlocked entries are ignored', () => {
-    const cfg = WATCHES.XMR;
-    const bal = cfg.balanceOf({
-      stats: { balance: '134569291' },
-      unlocked: ['3743625:9ea87efc:670125668133:unlocked:eu-de:prop'],
-      payments: [],
-    });
-    // 134,569,291 atomic units = 0.000134569291 XMR
-    expect(bal).toBeCloseTo(0.000134569291, 12);
-    // The old implementation summed r.amount over unlocked and always got 0.
-    expect(bal).not.toBe(0);
-  });
-});
-
 describe('DOGE merged watch (011)', () => {
   test('LTC_DOGE_DOGE watches the platform DOGE wallet and routes to merged distribution', () => {
     const cfg = WATCHES.LTC_DOGE_DOGE;
@@ -67,15 +52,5 @@ describe('computePayoutEvent (payout trigger decision logic)', () => {
 
   test('no change → none', () => {
     expect(computePayoutEvent(10, 10)).toEqual({ action: 'none' });
-  });
-
-  test('unpaid-drop mode: crossing the pool minimum and dropping = payout', () => {
-    // XMR: unpaid was 0.12 (≥ 0.1 min), now 0.02 → the pool paid ~0.10
-    expect(computePayoutEvent(0.12, 0.02, { minDrop: 0.1 })).toEqual({ action: 'payout', amount: 0.1 });
-  });
-
-  test('unpaid-drop mode: small unpaid changes are accrual noise, not payouts', () => {
-    expect(computePayoutEvent(0.03, 0.04, { minDrop: 0.1 })).toEqual({ action: 'none' });
-    expect(computePayoutEvent(0.03, 0.01, { minDrop: 0.1 })).toEqual({ action: 'none' });
   });
 });

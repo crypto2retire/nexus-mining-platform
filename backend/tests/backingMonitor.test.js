@@ -6,16 +6,12 @@ jest.mock('axios');
 jest.mock('../config/db', () => ({
   pool: { query: jest.fn() },
 }));
-jest.mock('../services/minerMonitor', () => ({
-  getMinerStatus: jest.fn(),
-}));
 jest.mock('../services/mrrRenter', () => ({
   getOrderStatus: jest.fn(),
 }));
 
 const axios = require('axios');
 const { pool } = require('../config/db');
-const { getMinerStatus } = require('../services/minerMonitor');
 const { getBacking, buildBacking, TTL_MS } = require('../services/backingMonitor');
 
 function mockPool(overrides = {}) {
@@ -24,7 +20,6 @@ function mockPool(overrides = {}) {
       return {
         rows: overrides.virtual || [
           { target_pool: 'KASPA', vghs: '25', rigs: '1' },
-          { target_pool: 'XMR', vghs: '25', rigs: '1' },
         ],
       };
     }
@@ -56,13 +51,11 @@ describe('buildBacking', () => {
     process.env.MRR_PLATFORM_WALLET_KAS = 'kaspa:test';
     process.env.MRR_PLATFORM_WALLET_LTC = 'ltc1test';
     process.env.MRR_PLATFORM_WALLET_DOGE = 'dtest';
-    process.env.XMR_WALLET_ADDRESS = 'xmr-test';
   });
 
   beforeEach(() => {
     jest.clearAllMocks();
     mockPool();
-    getMinerStatus.mockResolvedValue({ hashrate_10s: 1000 });
   });
 
   it('combines virtual capacity, active rentals, live pool hashrate and unpaid', async () => {
@@ -75,9 +68,6 @@ describe('buildBacking', () => {
       }
       if (url.includes('blockcypher.com')) {
         return { data: { balance: 0 } };
-      }
-      if (url.includes('herominers.com')) {
-        return { data: { stats: { balance: 134569291 } } }; // 0.0001346 XMR
       }
       return { data: {} };
     });
@@ -95,15 +85,6 @@ describe('buildBacking', () => {
     expect(backing.KASPA.pool_unpaid).toBeCloseTo(1.2059, 4);
     expect(backing.KASPA.pool_unpaid_unit).toBe('KAS');
     expect(backing.KASPA.mined_total).toBe(1.2345);
-  });
-
-  it('uses the Mac miner push for XMR real hashrate (kH/s)', async () => {
-    getMinerStatus.mockResolvedValue({ hashrate_10s: 2894 });
-    axios.get.mockResolvedValue({ data: { stats: { balance: 134569291 } } });
-    const backing = await buildBacking();
-    expect(backing.XMR.real_hash).toBeCloseTo(2.894, 3);
-    expect(backing.XMR.real_unit).toBe('kH/s');
-    expect(backing.XMR.pool_unpaid).toBeCloseTo(0.0001346, 7);
   });
 
   it('uses MRR rental averages for LTC real hashrate', async () => {
@@ -125,7 +106,6 @@ describe('buildBacking', () => {
 
   it('degrades to nulls when live fetches fail — never throws', async () => {
     axios.get.mockRejectedValue(new Error('ECONNREFUSED'));
-    getMinerStatus.mockRejectedValue(new Error('offline'));
     const backing = await buildBacking();
     expect(backing.KASPA.real_hash).toBeNull();
     expect(backing.KASPA.pool_unpaid).toBeNull();
@@ -139,14 +119,12 @@ describe('getBacking cache', () => {
     process.env.MRR_PLATFORM_WALLET_KAS = 'kaspa:test';
     process.env.MRR_PLATFORM_WALLET_LTC = 'ltc1test';
     process.env.MRR_PLATFORM_WALLET_DOGE = 'dtest';
-    process.env.XMR_WALLET_ADDRESS = 'xmr-test';
   });
 
   beforeEach(() => {
     jest.clearAllMocks();
     mockPool();
     axios.get.mockResolvedValue({ data: {} });
-    getMinerStatus.mockResolvedValue({ hashrate_10s: 1000 });
   });
 
   it('serves from cache within TTL and rebuilds after', async () => {
