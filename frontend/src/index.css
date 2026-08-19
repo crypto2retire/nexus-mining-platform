@@ -245,6 +245,11 @@ body {
   color: #f59e0b;
 }
 
+.status-pill.stale {
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+}
+
 .dormant-banner {
   background: rgba(245, 158, 11, 0.1);
   border: 1px solid rgba(245, 158, 11, 0.35);

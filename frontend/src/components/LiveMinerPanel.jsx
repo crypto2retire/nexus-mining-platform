@@ -36,6 +36,11 @@ export default function LiveMinerPanel({ isAdmin = false, wallet = '' }) {
   }, []);
 
   const online = Boolean(status?.online);
+  const stale = Boolean(status?.stale);
+  const lastSeen = status?.last_seen_seconds;
+  const lastSeenLabel = lastSeen != null
+    ? lastSeen < 120 ? `${lastSeen}s ago` : `${Math.floor(lastSeen / 60)}m ago`
+    : '';
   const [busy, setBusy] = useState(false);
   const [actionMsg, setActionMsg] = useState('');
   const [balance, setBalance] = useState(null);
@@ -67,7 +72,7 @@ export default function LiveMinerPanel({ isAdmin = false, wallet = '' }) {
         headers: { 'Content-Type': 'application/json', 'x-wallet': wallet },
       });
       const data = await res.json();
-      setActionMsg(data.ok ? (data.alreadyRunning ? 'Already running' : `Miner ${action === 'start' ? 'started' : 'stopped'}`) : `Error: ${data.error || res.status}`);
+      setActionMsg(data.ok ? (data.queued ? 'Command sent — applying in ~15s' : (data.alreadyRunning ? 'Already running' : `Miner ${action === 'start' ? 'started' : 'stopped'}`)) : `Error: ${data.error || res.status}`);
       // Refresh status shortly after the action.
       setTimeout(async () => {
         try {
@@ -86,8 +91,8 @@ export default function LiveMinerPanel({ isAdmin = false, wallet = '' }) {
     <section className="mining-card miner-panel">
       <div className="card-header">
         <h2>Live Miner — Local Machine</h2>
-        <span className={`status-pill ${online ? 'active' : 'idle'}`}>
-          {online ? 'MINING' : 'OFFLINE'}
+        <span className={`status-pill ${!online ? 'idle' : stale ? 'stale' : 'active'}`}>
+          {!online ? 'OFFLINE' : stale ? `STALE · ${lastSeenLabel}` : 'MINING'}
         </span>
       </div>
 

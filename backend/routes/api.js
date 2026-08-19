@@ -5,7 +5,9 @@ const { handleRewardWebhook } = require('../services/rewardDistributor');
 const { getRewards, claimRewards, withdrawRewards, listWithdrawals, markWithdrawalPaid, rejectWithdrawal } = require('../controllers/rewardsController');
 const { getAdminStats } = require('../controllers/adminStatsController');
 const { getMinerStatus } = require('../services/minerMonitor');
-const { startMiner, stopMiner, authorizeControl, switchCoin } = require('../services/minerControl');
+const { authorizeControl, switchCoin } = require('../services/minerControl');
+const { authorizePushKey, enqueueCommand, listPendingCommands, completeCommand } = require('../services/minerPush');
+const { pool } = require('../config/db');
 const { getPoolBalance } = require('../services/poolBalance');
 const { getOpportunities } = require('../services/coinMonitor');
 const { COINS, walletFor, isSwitchable } = require('../services/coinRegistry');
@@ -74,8 +76,10 @@ router.get('/mining/opportunities', async (_req, res) => {
   }
 });
 
-// Switch the miner to a different coin (proxy to the machine running XMRig).
+// Switch the miner to a different coin.
 // ADMIN ONLY — switches the platform's real mining hardware.
+// The command is queued (miner_commands) and executed by the Mac miner
+// agent on its next poll (~15s) — no reverse tunnel required.
 router.post('/miner/switch', requireAdmin, async (req, res) => {
   const symbol = (req.body?.symbol || '').toUpperCase();
   if (!COINS[symbol]) return res.status(400).json({ ok: false, error: `Unknown coin: ${symbol}` });
@@ -86,18 +90,8 @@ router.post('/miner/switch', requireAdmin, async (req, res) => {
     });
   }
   try {
-    if (process.env.MINER_CONTROL_URL) {
-      const axios = require('axios');
-      const url = process.env.MINER_CONTROL_URL.replace(/\/$/, '') + '/switch';
-      const r = await axios.post(url, { symbol }, {
-        headers: { 'x-miner-control-key': process.env.MINER_CONTROL_KEY || '' },
-        timeout: 60000,
-      });
-      return res.json(r.data);
-    }
-    // Local mode: run the switch directly.
-    const coin = { ...COINS[symbol], wallet: walletFor(symbol) };
-    res.json(await switchCoin(coin));
+    const row = await enqueueCommand(pool, 'switch', { symbol });
+    return res.json({ ok: true, queued: true, command_id: row.id });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }
@@ -122,11 +116,14 @@ router.post('/miner/control/switch', async (req, res) => {
   }
 });
 
-// Miner control: proxy to the machine that runs XMRig, or act locally.
+// Miner control: enqueue start/stop commands for the Mac miner agent.
 // ADMIN ONLY — anyone could otherwise stop the platform's miner.
+// The agent picks these up on its next poll (~15s) and executes them
+// locally via the Mac's /api/miner/control/* endpoints.
 router.post('/miner/start', requireAdmin, async (_req, res) => {
   try {
-    res.json(await startMiner());
+    const row = await enqueueCommand(pool, 'start');
+    res.json({ ok: true, queued: true, command_id: row.id });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }
@@ -134,7 +131,43 @@ router.post('/miner/start', requireAdmin, async (_req, res) => {
 
 router.post('/miner/stop', requireAdmin, async (_req, res) => {
   try {
-    res.json(await stopMiner());
+    const row = await enqueueCommand(pool, 'stop');
+    res.json({ ok: true, queued: true, command_id: row.id });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// --- Outbound miner agent endpoints (guard: MINER_PUSH_KEY, `x-push-key`) ---
+// These are called BY THE MAC's miner agent over outbound HTTPS — no tunnel.
+
+// The agent pushes the XMRig status every ~15s.
+router.post('/miner/push', async (req, res) => {
+  if (!authorizePushKey(req)) return res.status(403).json({ ok: false, error: 'Forbidden' });
+  const { pushStatus } = require('../services/minerPush');
+  pushStatus(req.body || {});
+  res.json({ ok: true, received_at: Date.now() });
+});
+
+// The agent polls for pending commands (start/stop/switch).
+router.get('/miner/commands', async (_req, res) => {
+  if (!authorizePushKey(_req)) return res.status(403).json({ ok: false, error: 'Forbidden' });
+  try {
+    const commands = await listPendingCommands(pool);
+    res.json({ commands });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// The agent reports a command's result.
+router.post('/miner/command-result', async (req, res) => {
+  if (!authorizePushKey(req)) return res.status(403).json({ ok: false, error: 'Forbidden' });
+  const { command_id, ok, result, error } = req.body || {};
+  if (!command_id) return res.status(400).json({ ok: false, error: 'command_id required' });
+  try {
+    const row = await completeCommand(pool, command_id, Boolean(ok), result, error);
+    res.json({ ok: true, command: row });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }
