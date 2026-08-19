@@ -1,4 +1,5 @@
 const { pool } = require('../config/db');
+const { isAdminWallet } = require('../middleware/adminAuth');
 
 /**
  * The zero address is a burn address — real USDC sent there is unrecoverable.
@@ -84,6 +85,7 @@ async function getDashboard(req, res) {
         usdc_balance: Number(wallet.rows[0]?.usdc_balance || 0),
         rigs: rigsByPool,
         pending_rewards: pendingByPool,
+        is_admin: isAdminWallet(walletAddress),
         // Never expose a missing/zero-address treasury — the zero address is a
         // burn address and players would lose real USDC sending to it.
         deposit_address: isSafeTreasury() ? process.env.PLATFORM_TREASURY_WALLET : null,

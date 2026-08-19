@@ -7,7 +7,7 @@ const API_BASE = import.meta.env.VITE_API_URL || '';
  * Ranked by estimated $/day for THIS machine (M4, measured hashrates).
  * Verified coins with a configured wallet can be switched to with one click.
  */
-export default function MiningOpportunities({ currentPool }) {
+export default function MiningOpportunities({ currentPool, isAdmin = false, wallet = '' }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState('');
@@ -41,7 +41,7 @@ export default function MiningOpportunities({ currentPool }) {
     try {
       const res = await fetch(`${API_BASE}/api/miner/switch`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'x-wallet': wallet },
         body: JSON.stringify({ symbol }),
       });
       const d = await res.json();
@@ -108,7 +108,7 @@ export default function MiningOpportunities({ currentPool }) {
               </div>
             )}
             <div className="opp-actions">
-              {coin.verified ? (
+              {coin.verified && isAdmin ? (
                 <button
                   className="btn btn-balance"
                   disabled={busy || current || !coin.switchable}
@@ -116,6 +116,8 @@ export default function MiningOpportunities({ currentPool }) {
                 >
                   {busy === coin.symbol ? 'Switching…' : current ? 'Mining' : 'Switch to'}
                 </button>
+              ) : coin.verified ? (
+                <span className="miner-action-msg">switch is operator-only</span>
               ) : null}
               {coin.verified && !coin.wallet_configured && (
                 <span className="miner-action-msg">add {coin.symbol}_WALLET_ADDRESS to enable</span>

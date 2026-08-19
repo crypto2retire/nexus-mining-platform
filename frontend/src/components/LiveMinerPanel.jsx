@@ -6,7 +6,7 @@ const API_BASE = import.meta.env.VITE_API_URL || '';
  * Live miner panel — polls the backend /api/miner/status proxy every 10s
  * and shows the local XMRig's live hashrate, shares, uptime and pool.
  */
-export default function LiveMinerPanel() {
+export default function LiveMinerPanel({ isAdmin = false, wallet = '' }) {
   const [status, setStatus] = useState(null);
   const [error, setError] = useState('');
 
@@ -62,7 +62,10 @@ export default function LiveMinerPanel() {
     setBusy(true);
     setActionMsg('');
     try {
-      const res = await fetch(`${API_BASE}/api/miner/${action}`, { method: 'POST' });
+      const res = await fetch(`${API_BASE}/api/miner/${action}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-wallet': wallet },
+      });
       const data = await res.json();
       setActionMsg(data.ok ? (data.alreadyRunning ? 'Already running' : `Miner ${action === 'start' ? 'started' : 'stopped'}`) : `Error: ${data.error || res.status}`);
       // Refresh status shortly after the action.
@@ -92,20 +95,26 @@ export default function LiveMinerPanel() {
       {balanceError && <div className="error-banner">Balance: {balanceError}</div>}
 
       <div className="miner-controls">
-        <button
-          className="btn btn-primary"
-          disabled={busy || online}
-          onClick={() => runAction('start')}
-        >
-          ▶ Start Miner
-        </button>
-        <button
-          className="btn btn-danger"
-          disabled={busy || !online}
-          onClick={() => runAction('stop')}
-        >
-          ■ Stop Miner
-        </button>
+        {isAdmin ? (
+          <>
+            <button
+              className="btn btn-primary"
+              disabled={busy || online}
+              onClick={() => runAction('start')}
+            >
+              ▶ Start Miner
+            </button>
+            <button
+              className="btn btn-danger"
+              disabled={busy || !online}
+              onClick={() => runAction('stop')}
+            >
+              ■ Stop Miner
+            </button>
+          </>
+        ) : (
+          <p className="admin-only-note">Miner start/stop is operator-only.</p>
+        )}
         <button
           className="btn btn-balance"
           disabled={busy}

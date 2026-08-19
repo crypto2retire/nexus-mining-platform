@@ -4,6 +4,7 @@ import SummaryRow from './components/SummaryRow';
 import LiveMinerPanel from './components/LiveMinerPanel';
 import MiningOpportunities from './components/MiningOpportunities';
 import GetStarted from './components/GetStarted';
+import AdminPanel from './components/AdminPanel';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 const STORAGE_KEY = 'nexus.wallet';
@@ -268,8 +269,10 @@ export default function App() {
 
             <GetStarted depositAddress={data.deposit_address} />
 
-            <LiveMinerPanel />
-            <MiningOpportunities currentPool={minerStatus?.pool} />
+            <LiveMinerPanel isAdmin={!!data.is_admin} wallet={wallet} />
+            <MiningOpportunities currentPool={minerStatus?.pool} isAdmin={!!data.is_admin} wallet={wallet} />
+
+            {data.is_admin && <AdminPanel wallet={wallet} />}
 
             <section className="mining-grid">
               {POOLS.map((pool) => (

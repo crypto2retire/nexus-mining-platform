@@ -8,6 +8,7 @@ const { startMiner, stopMiner, authorizeControl, switchCoin } = require('../serv
 const { getPoolBalance } = require('../services/poolBalance');
 const { getOpportunities } = require('../services/coinMonitor');
 const { COINS, walletFor, isSwitchable } = require('../services/coinRegistry');
+const { requireAdmin } = require('../middleware/adminAuth');
 
 const router = express.Router();
 
@@ -19,11 +20,13 @@ router.get('/rewards', getRewards);
 router.post('/rewards/claim', claimRewards);
 router.post('/rewards/withdraw', withdrawRewards);
 // Operator withdrawal queue: list, mark paid (with tx hash), reject.
-router.get('/rewards/withdrawals', listWithdrawals);
-router.post('/rewards/withdrawals/:id/paid', markWithdrawalPaid);
-router.post('/rewards/withdrawals/:id/reject', rejectWithdrawal);
+// ADMIN ONLY — these move/release real mined coins.
+router.get('/rewards/withdrawals', requireAdmin, listWithdrawals);
+router.post('/rewards/withdrawals/:id/paid', requireAdmin, markWithdrawalPaid);
+router.post('/rewards/withdrawals/:id/reject', requireAdmin, rejectWithdrawal);
 // Automatic payout trigger: watch status + manual check (baselines + events).
-router.get('/rewards/payout-status', async (_req, res) => {
+// Status is admin-only (internal state); manual check triggers real API calls.
+router.get('/rewards/payout-status', requireAdmin, async (_req, res) => {
   try {
     const { getPayoutStatus } = require('../services/payoutTrigger');
     res.json(await getPayoutStatus());
@@ -31,7 +34,7 @@ router.get('/rewards/payout-status', async (_req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-router.post('/rewards/check-payouts', async (_req, res) => {
+router.post('/rewards/check-payouts', requireAdmin, async (_req, res) => {
   try {
     const { checkPayouts } = require('../services/payoutTrigger');
     res.json({ results: await checkPayouts() });
@@ -66,7 +69,8 @@ router.get('/mining/opportunities', async (_req, res) => {
 });
 
 // Switch the miner to a different coin (proxy to the machine running XMRig).
-router.post('/miner/switch', async (req, res) => {
+// ADMIN ONLY — switches the platform's real mining hardware.
+router.post('/miner/switch', requireAdmin, async (req, res) => {
   const symbol = (req.body?.symbol || '').toUpperCase();
   if (!COINS[symbol]) return res.status(400).json({ ok: false, error: `Unknown coin: ${symbol}` });
   if (!isSwitchable(symbol)) {
@@ -113,7 +117,8 @@ router.post('/miner/control/switch', async (req, res) => {
 });
 
 // Miner control: proxy to the machine that runs XMRig, or act locally.
-router.post('/miner/start', async (_req, res) => {
+// ADMIN ONLY — anyone could otherwise stop the platform's miner.
+router.post('/miner/start', requireAdmin, async (_req, res) => {
   try {
     res.json(await startMiner());
   } catch (err) {
@@ -121,7 +126,7 @@ router.post('/miner/start', async (_req, res) => {
   }
 });
 
-router.post('/miner/stop', async (_req, res) => {
+router.post('/miner/stop', requireAdmin, async (_req, res) => {
   try {
     res.json(await stopMiner());
   } catch (err) {
@@ -134,10 +139,9 @@ router.post('/miner/stop', async (_req, res) => {
 router.post('/miner/control/start', async (req, res) => {
   if (!authorizeControl(req)) return res.status(403).json({ ok: false, error: 'Forbidden' });
   try {
-    const { startLocal } = require('../services/minerControl');
     const running = await require('../services/minerControl').isRunning();
     if (running) return res.json({ ok: true, alreadyRunning: true });
-    const result = await startLocal();
+    const result = await require('../services/minerControl').startLocal();
     res.json({ ok: true, ...result });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
@@ -147,8 +151,7 @@ router.post('/miner/control/start', async (req, res) => {
 router.post('/miner/control/stop', async (req, res) => {
   if (!authorizeControl(req)) return res.status(403).json({ ok: false, error: 'Forbidden' });
   try {
-    const { stopLocal } = require('../services/minerControl');
-    const result = await stopLocal();
+    const result = await require('../services/minerControl').stopLocal();
     res.json({ ok: true, ...result });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
