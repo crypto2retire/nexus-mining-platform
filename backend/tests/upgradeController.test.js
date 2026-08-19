@@ -114,9 +114,9 @@ describe('upgradeRig — currency conversion + order loop', () => {
 
     expect(res.statusCode).toBeNull(); // 200 via res.json directly
     expect(res.body.success).toBe(true);
-    // Level 1 -> 2 costs 50 USDC. Fee 5% = 2.5. Net 47.5 USDC / 100000 = 0.000475 BTC.
-    expect(res.body.protocol_fee_usdc).toBe(2.5);
-    expect(res.body.btc_spent).toBe(0.000475);
+    // Level 1 -> 2 costs 20 USDC (ZCASH per-coin pricing). Fee 5% = 1.0. Net 19 USDC / 100000 = 0.00019 BTC.
+    expect(res.body.protocol_fee_usdc).toBe(1);
+    expect(res.body.btc_spent).toBe(0.00019);
     expect(res.body.btc_spot_price).toBe(100000);
     expect(res.body.order_status).toBe('SIMULATED');
     expect(res.body.sandbox).toBe(true);
@@ -124,12 +124,12 @@ describe('upgradeRig — currency conversion + order loop', () => {
     // Revenue ledger books the FEE, not the full upgrade cost.
     const revenueInsert = queries.find((q) => q.sql.includes('INSERT INTO protocol_revenue_ledger'));
     expect(revenueInsert).toBeTruthy();
-    expect(revenueInsert.params[1]).toBe(2.5);
+    expect(revenueInsert.params[1]).toBe(1);
     expect(revenueInsert.params[2]).toBe('RIG_UPGRADE');
 
-    // Balance deducted 50 -> 950.
+    // Balance deducted 20 -> 980.
     const balanceUpdate = queries.find((q) => q.sql.includes('UPDATE user_wallets'));
-    expect(balanceUpdate.params[0]).toBe(950);
+    expect(balanceUpdate.params[0]).toBe(980);
 
     // Idempotency key stored on the order row; row reserved as PENDING.
     const orderInsert = queries.find((q) => q.sql.includes('INSERT INTO hashrate_orders'));
@@ -138,7 +138,7 @@ describe('upgradeRig — currency conversion + order loop', () => {
 
     // Order placed once, AFTER commit.
     expect(placeHashpowerOrder).toHaveBeenCalledTimes(1);
-    expect(placeHashpowerOrder).toHaveBeenCalledWith('ZCASH', 0.000475);
+    expect(placeHashpowerOrder).toHaveBeenCalledWith('ZCASH', 0.00019);
 
     // Audit row updated with the order id + status.
     const finalUpdate = pool.query.mock.calls.find(([sql]) => sql.includes('UPDATE hashrate_orders'));
@@ -147,7 +147,7 @@ describe('upgradeRig — currency conversion + order loop', () => {
   });
 
   test('insufficient balance: 400, no order placed, no deduction', async () => {
-    const { client } = makeClient({ balance: 30 });
+    const { client } = makeClient({ balance: 10 });
     pool.connect.mockResolvedValue(client);
 
     const res = makeRes();
@@ -174,10 +174,10 @@ describe('upgradeRig — currency conversion + order loop', () => {
     expect(res.statusCode).toBe(502);
     expect(res.body.error).toMatch(/USDC refunded/);
 
-    // Refund credited back (50 USDC) and status REFUNDED.
+    // Refund credited back (20 USDC) and status REFUNDED.
     const refundUpdate = queries.find((q) => q.sql.includes('usdc_balance = usdc_balance +'));
     expect(refundUpdate).toBeTruthy();
-    expect(refundUpdate.params[0]).toBe(50);
+    expect(refundUpdate.params[0]).toBe(20);
 
     const statusUpdate = queries.find((q) => q.sql.includes("status = 'REFUNDED'"));
     expect(statusUpdate).toBeTruthy();
@@ -254,7 +254,7 @@ describe('upgradeRig — currency conversion + order loop', () => {
     // The NiceHash renter must NOT be involved.
     expect(placeHashpowerOrder).not.toHaveBeenCalled();
     expect(mrrPlace).toHaveBeenCalledTimes(1);
-    expect(mrrPlace).toHaveBeenCalledWith('ZCASH', 0.000475);
+    expect(mrrPlace).toHaveBeenCalledWith('ZCASH', 0.00019);
 
     // Order row records the marketplace for the audit trail.
     const orderInsert = queries.find((q) => q.sql.includes('INSERT INTO hashrate_orders'));
@@ -313,5 +313,26 @@ describe('upgradeRig — currency conversion + order loop', () => {
     await upgradeRig(req({ request_id: '' }), res3);
     expect(res3.statusCode).toBe(400);
     expect(res3.body.error).toMatch(/request_id/);
+  });
+
+  test('per-coin pricing: KASPA tier 2 is $5 (not the flat $50), LTC_DOGE stays premium', async () => {
+    const { client } = makeClient({ balance: 1000 });
+    pool.connect.mockResolvedValue(client);
+
+    // KASPA tier 2 = $5. Fee 5% = 0.25. Net 4.75 / 100000 = 0.0000475 BTC.
+    const res = makeRes();
+    await upgradeRig(req({ target_pool: 'KASPA', request_id: 'req-kas-1' }), res);
+    expect(res.body.success).toBe(true);
+    expect(res.body.protocol_fee_usdc).toBe(0.25);
+    expect(res.body.btc_spent).toBe(0.0000475);
+    expect(placeHashpowerOrder).toHaveBeenCalledWith('KASPA', 0.0000475);
+
+    // LTC_DOGE tier 2 = $50. Fee 5% = 2.5. Net 47.5 / 100000 = 0.000475 BTC.
+    const res2 = makeRes();
+    await upgradeRig(req({ target_pool: 'LTC_DOGE', request_id: 'req-ltc-1' }), res2);
+    expect(res2.body.success).toBe(true);
+    expect(res2.body.protocol_fee_usdc).toBe(2.5);
+    expect(res2.body.btc_spent).toBe(0.000475);
+    expect(placeHashpowerOrder).toHaveBeenCalledWith('LTC_DOGE', 0.000475);
   });
 });

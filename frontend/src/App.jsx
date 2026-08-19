@@ -282,6 +282,7 @@ export default function App() {
                   pool={pool.key}
                   rig={data.rigs[pool.key]}
                   pendingReward={animated[pool.key] || data.pending_rewards[pool.key] || 0}
+                  upgradeCost={data.upgrade_cost?.[pool.key] ?? null}
                   onUpgrade={upgrade}
                   onClaim={claim}
                   onWithdraw={withdraw}

@@ -15,13 +15,50 @@ function getRenter() {
     : require('../services/hashrateRenter');
 }
 
-const UPGRADE_TIERS = [
-  { level: 1, cost: 0, hashrate: 10 },
-  { level: 2, cost: 50, hashrate: 25 },
-  { level: 3, cost: 120, hashrate: 60 },
-  { level: 4, cost: 300, hashrate: 150 },
-  { level: 5, cost: 750, hashrate: 400 },
-];
+/**
+ * Per-coin upgrade pricing — entry points reflect the REAL cost of backing
+ * that hashrate on the marketplace (rental $/day differs hugely per coin).
+ * Virtual hashrate ladder is the same everywhere; only the price differs.
+ *
+ *   KASPA/XMR (cheap to back):   $5 / $10 / $25 / $50
+ *   ZCASH (mid):                 $20 / $40 / $100 / $200
+ *   LTC_DOGE (expensive rigs):   $50 / $120 / $300 / $750
+ */
+const POOL_TIERS = {
+  KASPA: [
+    { level: 1, cost: 0, hashrate: 10 },
+    { level: 2, cost: 5, hashrate: 25 },
+    { level: 3, cost: 10, hashrate: 60 },
+    { level: 4, cost: 25, hashrate: 150 },
+    { level: 5, cost: 50, hashrate: 400 },
+  ],
+  XMR: [
+    { level: 1, cost: 0, hashrate: 10 },
+    { level: 2, cost: 5, hashrate: 25 },
+    { level: 3, cost: 10, hashrate: 60 },
+    { level: 4, cost: 25, hashrate: 150 },
+    { level: 5, cost: 50, hashrate: 400 },
+  ],
+  ZCASH: [
+    { level: 1, cost: 0, hashrate: 10 },
+    { level: 2, cost: 20, hashrate: 25 },
+    { level: 3, cost: 40, hashrate: 60 },
+    { level: 4, cost: 100, hashrate: 150 },
+    { level: 5, cost: 200, hashrate: 400 },
+  ],
+  LTC_DOGE: [
+    { level: 1, cost: 0, hashrate: 10 },
+    { level: 2, cost: 50, hashrate: 25 },
+    { level: 3, cost: 120, hashrate: 60 },
+    { level: 4, cost: 300, hashrate: 150 },
+    { level: 5, cost: 750, hashrate: 400 },
+  ],
+};
+
+/** Tiers for a pool; falls back to the (now legacy) flat ladder for unknown pools. */
+function tiersFor(pool) {
+  return POOL_TIERS[pool] || POOL_TIERS.LTC_DOGE;
+}
 
 const PROTOCOL_FEE_PCT = 0.05;
 
@@ -100,7 +137,7 @@ async function upgradeSelfMinedRig(req, res) {
     const rig = rigResult.rows[0];
     const currentLevel = rig ? rig.level : 1;
 
-    nextTier = UPGRADE_TIERS.find((t) => t.level === currentLevel + 1);
+    nextTier = tiersFor(targetPool).find((t) => t.level === currentLevel + 1);
     if (!nextTier) {
       await client.query('ROLLBACK');
       return res.status(400).json({ error: 'Already at max level' });
@@ -252,7 +289,7 @@ async function upgradeRig(req, res) {
     const rig = rigResult.rows[0];
     const currentLevel = rig ? rig.level : 1;
 
-    nextTier = UPGRADE_TIERS.find((t) => t.level === currentLevel + 1);
+    nextTier = tiersFor(targetPool).find((t) => t.level === currentLevel + 1);
     if (!nextTier) {
       await client.query('ROLLBACK');
       return res.status(400).json({ error: 'Already at max level' });
@@ -353,7 +390,7 @@ async function upgradeRig(req, res) {
         [orderResult.error, orderRecordId]
       );
       // Revert the rig to its pre-upgrade level (or delete if it was just created).
-      const prevTier = UPGRADE_TIERS.find((t) => t.level === nextTier.level - 1) || null;
+      const prevTier = tiersFor(targetPool).find((t) => t.level === nextTier.level - 1) || null;
       if (prevTier) {
         await refundClient.query(
           'UPDATE virtual_rigs SET level = $1, virtual_hashrate = $2, updated_at = CURRENT_TIMESTAMP WHERE user_id = $3 AND target_pool = $4',
@@ -430,4 +467,4 @@ async function upgradeRig(req, res) {
   });
 }
 
-module.exports = { upgradeRig, UPGRADE_TIERS, PROTOCOL_FEE_PCT };
+module.exports = { upgradeRig, POOL_TIERS, tiersFor, PROTOCOL_FEE_PCT };

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 
-export default function MiningRoomCard({ title, pool, rig, pendingReward, onUpgrade, onClaim, onWithdraw }) {
+export default function MiningRoomCard({ title, pool, rig, pendingReward, upgradeCost, onUpgrade, onClaim, onWithdraw }) {
   const [animating, setAnimating] = useState(false);
   const level = Number(rig?.level) || 1;
   const hashrate = Number(rig?.virtual_hashrate) || 0;
@@ -50,8 +50,9 @@ export default function MiningRoomCard({ title, pool, rig, pendingReward, onUpgr
           className={`btn-primary ${animating ? 'pulse' : ''}`}
           onClick={handleUpgrade}
           disabled={level >= 5}
+          title={upgradeCost ? `Upgrade to level ${level + 1} — $${upgradeCost}` : 'Max level reached'}
         >
-          Upgrade Rig
+          {level >= 5 ? 'Max Level' : `Upgrade Rig — $${upgradeCost ?? '—'}`}
         </button>
         <button className="btn-secondary" disabled={pendingReward <= 0} onClick={handleClaim}>
           Claim Yield

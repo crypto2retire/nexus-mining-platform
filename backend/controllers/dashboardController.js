@@ -1,5 +1,6 @@
 const { pool } = require('../config/db');
 const { isAdminWallet } = require('../middleware/adminAuth');
+const { tiersFor } = require('./upgradeController');
 
 /**
  * The zero address is a burn address — real USDC sent there is unrecoverable.
@@ -50,17 +51,22 @@ async function getDashboard(req, res) {
 
       const pools = ['ZCASH', 'KASPA', 'LTC_DOGE', 'XMR'];
       const rigsByPool = {};
+      const upgradeCostByPool = {};
       for (const pool of pools) {
         const rig = rigs.rows.find(r => r.target_pool === pool);
+        const level = rig ? Number(rig.level) : 1;
         // pg returns NUMERIC as strings — coerce so the frontend can call .toFixed()
         rigsByPool[pool] = rig
           ? {
               rig_id: rig.rig_id,
               target_pool: rig.target_pool,
               virtual_hashrate: Number(rig.virtual_hashrate),
-              level: Number(rig.level),
+              level,
             }
           : null;
+        // Per-coin next upgrade price (entry points reflect real backing cost).
+        const nextTier = tiersFor(pool).find((t) => t.level === level + 1);
+        upgradeCostByPool[pool] = nextTier ? nextTier.cost : null;
       }
 
       const rewards = await client.query(
@@ -84,6 +90,7 @@ async function getDashboard(req, res) {
         wallet_address: walletAddress,
         usdc_balance: Number(wallet.rows[0]?.usdc_balance || 0),
         rigs: rigsByPool,
+        upgrade_cost: upgradeCostByPool,
         pending_rewards: pendingByPool,
         is_admin: isAdminWallet(walletAddress),
         // Never expose a missing/zero-address treasury — the zero address is a
