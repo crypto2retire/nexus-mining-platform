@@ -30,6 +30,12 @@ async function ensureUser(client, walletAddress) {
 
 async function processDeposit(from, to, value, txHash) {
   const treasury = (process.env.PLATFORM_TREASURY_WALLET || '').toLowerCase();
+  // SAFETY: the zero/missing treasury is a burn address — never credit
+  // deposits (and never display it) until a real wallet is configured.
+  if (!/^0x[a-f0-9]{40}$/.test(treasury) || treasury === '0x0000000000000000000000000000000000000000') {
+    console.error('❌ PLATFORM_TREASURY_WALLET is missing or the zero address — deposits DISABLED. Set a real wallet before accepting USDC.');
+    return;
+  }
   if (to.toLowerCase() !== treasury) return;
 
   const client = await pool.connect();

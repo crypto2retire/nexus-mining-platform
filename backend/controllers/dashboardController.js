@@ -1,5 +1,15 @@
 const { pool } = require('../config/db');
 
+/**
+ * The zero address is a burn address — real USDC sent there is unrecoverable.
+ * The platform treasury must be a real wallet the operator controls. Until it
+ * is, deposits are NOT exposed in the UI and NOT credited by the listener.
+ */
+function isSafeTreasury() {
+  const t = (process.env.PLATFORM_TREASURY_WALLET || '').toLowerCase();
+  return /^0x[a-f0-9]{40}$/.test(t) && t !== '0x0000000000000000000000000000000000000000';
+}
+
 async function getDashboard(req, res) {
   try {
     const walletAddress = (req.query.wallet || '').toLowerCase();
@@ -74,7 +84,9 @@ async function getDashboard(req, res) {
         usdc_balance: Number(wallet.rows[0]?.usdc_balance || 0),
         rigs: rigsByPool,
         pending_rewards: pendingByPool,
-        deposit_address: process.env.PLATFORM_TREASURY_WALLET || null,
+        // Never expose a missing/zero-address treasury — the zero address is a
+        // burn address and players would lose real USDC sending to it.
+        deposit_address: isSafeTreasury() ? process.env.PLATFORM_TREASURY_WALLET : null,
       });
     } finally {
       client.release();
