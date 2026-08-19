@@ -4,6 +4,21 @@ jest.mock('../config/db', () => ({
 
 const { computePayoutEvent, WATCHES } = require('../services/payoutTrigger');
 
+describe('XMR watch (unpaid-drop)', () => {
+  test('reads unpaid balance from stats.balance; string unlocked entries are ignored', () => {
+    const cfg = WATCHES.XMR;
+    const bal = cfg.balanceOf({
+      stats: { balance: '134569291' },
+      unlocked: ['3743625:9ea87efc:670125668133:unlocked:eu-de:prop'],
+      payments: [],
+    });
+    // 134,569,291 atomic units = 0.000134569291 XMR
+    expect(bal).toBeCloseTo(0.000134569291, 12);
+    // The old implementation summed r.amount over unlocked and always got 0.
+    expect(bal).not.toBe(0);
+  });
+});
+
 describe('DOGE merged watch (011)', () => {
   test('LTC_DOGE_DOGE watches the platform DOGE wallet and routes to merged distribution', () => {
     const cfg = WATCHES.LTC_DOGE_DOGE;

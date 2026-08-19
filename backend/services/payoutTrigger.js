@@ -50,9 +50,11 @@ const WATCHES = {
     accountUrl: (addr) => `https://monero.herominers.com/api/stats_address?address=${addr}`,
     statsUrl: null,
     balanceOf: (d) => {
-      // unlocked array entries are payout records with .amount
-      const arr = d.unlocked || [];
-      return arr.reduce((s, r) => s + (Number(r?.amount) || 0), 0);
+      // stats.balance = the wallet's UNPAID pool balance in atomic units
+      // (1 XMR = 1e12). Verified 2026-08-19: the API's `unlocked` array
+      // entries are colon-separated STRINGS, not objects — summing r.amount
+      // over them always returned 0, so XMR payouts were never detected.
+      return Number(d?.stats?.balance || 0) / 1e12;
     },
     netHashOf: () => null,
   },
