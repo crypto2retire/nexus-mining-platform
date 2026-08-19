@@ -17,9 +17,8 @@ const { distributePayout } = require('./rewardDistributor');
  *                   (XMR payouts are months away at current rates — this is
  *                   a placeholder-safe heuristic.)
  *
- * LTC_DOGE is NOT auto-watched: no verified public balance API for the
- * ltc1... wallet (F2Pool lookup returns 404 for bech32 addresses) — manual
- * webhook fires for LTC until a verified endpoint exists.
+ * LTC_DOGE uses Blockcypher (F2Pool accepts bech32 workers — stratum-verified
+ * — but its stats page can't look up ltc1... addresses).
  *
  * State persists in payout_watch so restarts never double-distribute.
  */
@@ -55,6 +54,18 @@ const WATCHES = {
       const arr = d.unlocked || [];
       return arr.reduce((s, r) => s + (Number(r?.amount) || 0), 0);
     },
+    netHashOf: () => null,
+  },
+  LTC_DOGE: {
+    // F2Pool accepts bech32 workers for MINING (stratum-authorize verified
+    // 2026-08-19) but its stats page 404s on ltc1... addresses — so the
+    // watcher uses Blockcypher's on-chain balance instead.
+    mode: 'balance-delta',
+    walletEnv: 'MRR_PLATFORM_WALLET_LTC',
+    accountUrl: (addr) => `https://api.blockcypher.com/v1/ltc/main/addrs/${addr}`,
+    statsUrl: null,
+    // Blockcypher returns SATOSHIS (1 LTC = 1e8)
+    balanceOf: (d) => Number(d.balance) / 1e8,
     netHashOf: () => null,
   },
 };
@@ -215,8 +226,8 @@ async function getPayoutStatus() {
     wallets: {
       ZCASH: process.env.MRR_PLATFORM_WALLET_ZEC ? 'set' : 'unset',
       KASPA: process.env.MRR_PLATFORM_WALLET_KAS ? 'set' : 'unset',
+      LTC_DOGE: process.env.MRR_PLATFORM_WALLET_LTC ? 'set' : 'unset',
       XMR: process.env.XMR_WALLET_ADDRESS ? 'set' : 'unset',
-      LTC_DOGE: 'not-auto-watched',
     },
     watches: rows,
   };
