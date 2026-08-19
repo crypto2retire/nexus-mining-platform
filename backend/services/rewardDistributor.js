@@ -23,6 +23,8 @@ const POOL_COINGECKO = {
   KASPA: 'kaspa',
   LTC_DOGE: 'litecoin',
   XMR: 'monero',
+  // Synthetic key: the DOGE side of the LTC_DOGE merged pool.
+  LTC_DOGE_DOGE: 'dogecoin',
 };
 
 async function fetchCoinUsdPrice(targetPool) {
@@ -241,6 +243,103 @@ async function distributePayout(targetPool, totalCryptoReward1, totalNetworkHash
 }
 
 /**
+ * Merged mining distribution (011): F2Pool pays the DOGE side of the LTC_DOGE
+ * pool separately. Pro-rata by the same time-weighted contributions, 95/5
+ * split, tracked in calculated_reward_2 (DOGE units) so it never mixes with
+ * the LTC amounts. No maintenance deduction (the base coin carries the cost
+ * anchor) and no dormancy logic. The 5% fee physically stays at the DOGE
+ * wallet; its USDC value is booked when the price feed is available.
+ */
+async function distributeMergedReward(targetPool, totalCryptoReward2, totalNetworkHashrate) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const periodEnd = new Date();
+    const last = await client.query(
+      'SELECT payout_timestamp FROM real_pool_payouts WHERE target_pool = $1 ORDER BY payout_timestamp DESC LIMIT 1',
+      [targetPool]
+    );
+    let periodStart;
+    if (last.rowCount > 0) {
+      periodStart = new Date(last.rows[0].payout_timestamp);
+    } else {
+      const first = await client.query(
+        'SELECT MIN(changed_at) AS c FROM rig_hashrate_history WHERE target_pool = $1',
+        [targetPool]
+      );
+      periodStart = first.rows[0]?.c
+        ? new Date(first.rows[0].c)
+        : new Date(periodEnd.getTime() - 24 * 3600 * 1000);
+    }
+
+    const payoutResult = await client.query(
+      `INSERT INTO real_pool_payouts
+        (target_pool, total_crypto_reward_1, total_crypto_reward_2, total_network_hashrate, period_start, period_end)
+       VALUES ($1, 0, $2, $3, $4, $5)
+       RETURNING payout_id`,
+      [targetPool, totalCryptoReward2, totalNetworkHashrate, periodStart, periodEnd]
+    );
+    const payoutId = payoutResult.rows[0].payout_id;
+
+    const contribs = await contributionsForPool(client, targetPool, periodStart, periodEnd);
+    const totalContribution = contribs.reduce((sum, c) => sum + c.contribution, 0);
+
+    // Book the 5% fee in USDC at the live DOGE price when available; a price
+    // outage never blocks distributing real coins.
+    let dogePrice = null;
+    try {
+      dogePrice = await fetchCoinUsdPrice('LTC_DOGE_DOGE');
+    } catch (err) {
+      console.warn(`LTC_DOGE: DOGE price feed down (${err.message}) — fee not converted for payout ${payoutId}`);
+    }
+
+    for (const c of contribs) {
+      if (totalContribution <= 0 || c.contribution <= 0) continue;
+      const sharePct = c.contribution / totalContribution;
+      const gross = Number(totalCryptoReward2) * sharePct;
+      const fee = gross * PROTOCOL_FEE_PCT;
+      const net = gross - fee;
+
+      await client.query(
+        `INSERT INTO user_rewards_ledger
+          (user_id, payout_id, calculated_reward_1, calculated_reward_2, protocol_fee_taken, status,
+           weighted_contribution, total_contribution, share_pct)
+         VALUES ($1, $2, 0, $3, $4, 'UNCLAIMED', $5, $6, $7)`,
+        [c.user_id, payoutId, net, fee, c.contribution, totalContribution, sharePct]
+      );
+
+      if (dogePrice && fee > 0) {
+        await client.query(
+          'INSERT INTO protocol_revenue_ledger (source_user_id, amount_usdc, transaction_type) VALUES ($1, $2, $3)',
+          [c.user_id, parseFloat((fee * dogePrice).toFixed(4)), 'MINING_REWARD_FEE']
+        );
+      }
+    }
+
+    await client.query(
+      'UPDATE real_pool_payouts SET total_contribution = $1 WHERE payout_id = $2',
+      [totalContribution, payoutId]
+    );
+
+    await client.query('COMMIT');
+    return {
+      payout_id: payoutId,
+      participants: contribs.length,
+      total_contribution: totalContribution,
+      period_start: periodStart.toISOString(),
+      period_end: periodEnd.toISOString(),
+    };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Merged reward distribution error:', err);
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/**
  * Reward webhook — external trigger (pool payout notification). Validates the
  * request, then delegates to distributePayout.
  */
@@ -270,4 +369,4 @@ async function handleRewardWebhook(req, res) {
   }
 }
 
-module.exports = { handleRewardWebhook, distributePayout, PROTOCOL_FEE_PCT };
+module.exports = { handleRewardWebhook, distributePayout, distributeMergedReward, PROTOCOL_FEE_PCT };

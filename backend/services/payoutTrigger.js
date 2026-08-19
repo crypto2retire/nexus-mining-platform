@@ -1,6 +1,6 @@
 const axios = require('axios');
 const { pool } = require('../config/db');
-const { distributePayout } = require('./rewardDistributor');
+const { distributePayout, distributeMergedReward } = require('./rewardDistributor');
 
 /**
  * Payout trigger — watches the platform mining wallets at their pools and
@@ -67,6 +67,20 @@ const WATCHES = {
     // Blockcypher returns SATOSHIS (1 LTC = 1e8)
     balanceOf: (d) => Number(d.balance) / 1e8,
     netHashOf: () => null,
+  },
+  // The DOGE side of the LTC_DOGE pool: F2Pool merged mining pays DOGE to its
+  // own bound address (011_doge_merged). Same balance-delta watch, distributed
+  // as calculated_reward_2 (DOGE units) instead of the LTC reward column.
+  LTC_DOGE_DOGE: {
+    mode: 'balance-delta',
+    walletEnv: 'MRR_PLATFORM_WALLET_DOGE',
+    accountUrl: (addr) => `https://api.blockcypher.com/v1/doge/main/addrs/${addr}`,
+    statsUrl: null,
+    // Blockcypher returns DOGE in smallest units (1 DOGE = 1e8)
+    balanceOf: (d) => Number(d.balance) / 1e8,
+    netHashOf: () => null,
+    distribute: 'merged',
+    gamePool: 'LTC_DOGE',
   },
 };
 
@@ -170,7 +184,9 @@ async function checkPool(poolKey) {
       // with a network-hashrate fetch (or accept null and record it).
       console.warn(`${poolKey}: detected payout ${event.amount} but no network hashrate; recording with null`);
     }
-    const result = await distributePayout(poolKey, event.amount, netHash ?? 0);
+    const result = cfg.distribute === 'merged'
+      ? await distributeMergedReward(cfg.gamePool || poolKey, event.amount, netHash ?? 0)
+      : await distributePayout(poolKey, event.amount, netHash ?? 0);
     await upsertBaseline(poolKey, balance, event.amount, new Date());
     return {
       pool: poolKey,
@@ -227,6 +243,7 @@ async function getPayoutStatus() {
       ZCASH: process.env.MRR_PLATFORM_WALLET_ZEC ? 'set' : 'unset',
       KASPA: process.env.MRR_PLATFORM_WALLET_KAS ? 'set' : 'unset',
       LTC_DOGE: process.env.MRR_PLATFORM_WALLET_LTC ? 'set' : 'unset',
+      LTC_DOGE_DOGE: process.env.MRR_PLATFORM_WALLET_DOGE ? 'set' : 'unset',
       XMR: process.env.XMR_WALLET_ADDRESS ? 'set' : 'unset',
     },
     watches: rows,

@@ -22,7 +22,7 @@ jest.mock('axios', () => ({ get: jest.fn() }));
 
 const { pool } = require('../config/db');
 const axios = require('axios');
-const { distributePayout } = require('../services/rewardDistributor');
+const { distributePayout, distributeMergedReward } = require('../services/rewardDistributor');
 const { reinvestRig, setMineAtLoss } = require('../controllers/upgradeController');
 const { getLiveBtcPrice } = require('../services/priceOracle');
 const { placeHashpowerOrder } = require('../services/hashrateRenter');
@@ -181,6 +181,44 @@ describe('distributePayout — multi-coin discount', () => {
     await distributePayout('KASPA', 100, 1000);
     const ledger0 = client0.query.mock.calls.find(([sql]) => sql.includes('INSERT INTO user_rewards_ledger'));
     expect(Number(ledger0[1][7])).toBeCloseTo(3, 6); // full maintenance
+  });
+});
+
+// ---- distributeMergedReward: DOGE side of LTC_DOGE (011) -------------------
+
+describe('distributeMergedReward — merged DOGE distribution', () => {
+  test('splits DOGE pro-rata 95/5 into calculated_reward_2, no maintenance, no dormancy', async () => {
+    const client = distributionClient({ price: null });
+    axios.get.mockRejectedValue(new Error('doge feed down')); // fee not converted, distribution still runs
+    const result = await distributeMergedReward('LTC_DOGE', 1000, 100000);
+
+    expect(result.payout_id).toBe('payout-1');
+    expect(result.participants).toBe(1);
+
+    const ledgerInsert = client.query.mock.calls.find(([sql]) => sql.includes('INSERT INTO user_rewards_ledger'));
+    expect(ledgerInsert).toBeTruthy();
+    // params: [user, payout, reward_2 (net), fee, contrib, total, share]
+    expect(Number(ledgerInsert[1][2])).toBeCloseTo(950, 6); // 95% of 1000 DOGE
+    expect(Number(ledgerInsert[1][3])).toBeCloseTo(50, 6); // 5% fee
+
+    // No maintenance fee rows (cost anchor stays on the LTC side).
+    const maintRows = client.query.mock.calls.filter(([sql]) => sql.includes('INSERT INTO maintenance_fee_ledger'));
+    expect(maintRows).toHaveLength(0);
+    // No dormancy (dormancy is driven by the base coin's payouts).
+    const dormant = client.query.mock.calls.find(([sql]) => sql.includes("maintenance_status = 'DORMANT'"));
+    expect(dormant).toBeFalsy();
+  });
+
+  test('books the 5% fee in USDC when the DOGE price is available', async () => {
+    const client = distributionClient({ price: null });
+    axios.get.mockResolvedValue({ data: { dogecoin: { usd: 0.1 } } });
+    await distributeMergedReward('LTC_DOGE', 1000, 100000);
+
+    const fee = client.query.mock.calls.find(
+      ([sql, p]) => sql.includes('INSERT INTO protocol_revenue_ledger') && p && Number(p[1]) > 0
+    );
+    expect(fee).toBeTruthy();
+    expect(Number(fee[1][1])).toBeCloseTo(5, 6); // 50 DOGE × $0.10
   });
 });
 

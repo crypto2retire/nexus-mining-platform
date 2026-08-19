@@ -607,14 +607,17 @@ async function reinvestRig(req, res) {
 
     // Value of the user's mined tokens for THIS pool at the live coin price.
     let coinPrice;
+    let dogePrice = 0;
     try {
       coinPrice = await fetchCoinUsdPrice(targetPool);
+      // Merged DOGE (calculated_reward_2) converts at its own price.
+      if (targetPool === 'LTC_DOGE') dogePrice = await fetchCoinUsdPrice('LTC_DOGE_DOGE');
     } catch (err) {
       await client.query('ROLLBACK');
       return res.status(502).json({ error: `Price oracle unavailable: ${err.message}` });
     }
 
-    claimedUsdc = await claimPoolRewardsInTx(client, userId, walletId, targetPool, coinPrice);
+    claimedUsdc = await claimPoolRewardsInTx(client, userId, walletId, targetPool, coinPrice, dogePrice);
     await client.query('COMMIT');
 
     if (claimedUsdc <= 0) {

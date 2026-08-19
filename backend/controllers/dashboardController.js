@@ -80,6 +80,7 @@ async function getDashboard(req, res) {
       const rewards = await client.query(
         `SELECT
           COALESCE(SUM(calculated_reward_1) FILTER (WHERE status = 'UNCLAIMED'), 0) AS pending_reward_1,
+          COALESCE(SUM(calculated_reward_2) FILTER (WHERE status = 'UNCLAIMED'), 0) AS pending_reward_2,
           target_pool
          FROM user_rewards_ledger
          LEFT JOIN real_pool_payouts USING (payout_id)
@@ -89,8 +90,12 @@ async function getDashboard(req, res) {
       );
 
       const pendingByPool = {};
+      const pendingDogeByPool = {};
       for (const row of rewards.rows) {
         pendingByPool[row.target_pool] = Number(row.pending_reward_1);
+        if (Number(row.pending_reward_2) > 0) {
+          pendingDogeByPool[row.target_pool] = Number(row.pending_reward_2);
+        }
       }
 
       const coinsOwned = await coinsOwnedFor(client, userId);
@@ -103,6 +108,7 @@ async function getDashboard(req, res) {
         upgrade_cost: upgradeCostByPool,
         maintenance_rate: maintenanceRateByPool,
         pending_rewards: pendingByPool,
+        pending_rewards_2: pendingDogeByPool,
         multi_coin: { coins_owned: coinsOwned, discount_pct: discountPctFor(coinsOwned) },
         is_admin: isAdminWallet(walletAddress),
         // Never expose a missing/zero-address treasury — the zero address is a

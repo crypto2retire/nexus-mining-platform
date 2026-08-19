@@ -5,11 +5,13 @@ const { pool } = require('../config/db');
  * Shared helper: convert a user's UNCLAIMED rewards for ONE pool to USDC
  * balance at the given live price. Must be called inside an open transaction
  * with the user + wallet rows locked.
+ * dogePrice: only used for LTC_DOGE rows with a merged DOGE portion
+ * (calculated_reward_2).
  * @returns {Promise<number>} total USDC credited
  */
-async function claimPoolRewardsInTx(client, userId, walletId, targetPool, price) {
+async function claimPoolRewardsInTx(client, userId, walletId, targetPool, price, dogePrice = 0) {
   const ledgerResult = await client.query(
-    `SELECT l.ledger_id, l.calculated_reward_1
+    `SELECT l.ledger_id, l.calculated_reward_1, l.calculated_reward_2
        FROM user_rewards_ledger l
        JOIN real_pool_payouts p USING (payout_id)
       WHERE l.user_id = $1 AND l.status = 'UNCLAIMED' AND l.withdrawal_id IS NULL
@@ -21,7 +23,7 @@ async function claimPoolRewardsInTx(client, userId, walletId, targetPool, price)
 
   let totalUsdc = 0;
   for (const row of ledgerResult.rows) {
-    const usdc = round4(Number(row.calculated_reward_1) * price);
+    const usdc = round4(Number(row.calculated_reward_1) * price + Number(row.calculated_reward_2 || 0) * dogePrice);
     totalUsdc = round4(totalUsdc + usdc);
     await client.query(
       `UPDATE user_rewards_ledger
@@ -53,6 +55,8 @@ const POOL_COINGECKO = {
   KASPA: 'kaspa',
   LTC_DOGE: 'litecoin',
   XMR: 'monero',
+  // Synthetic key: the DOGE side of the LTC_DOGE merged pool.
+  LTC_DOGE_DOGE: 'dogecoin',
 };
 
 function round4(n) {
@@ -198,6 +202,8 @@ async function claimRewards(req, res) {
   try {
     for (const p of pendingPools) {
       prices[p] = await fetchCoinUsdPrice(p);
+      // The merged DOGE side needs its own price for the claim conversion.
+      if (p === 'LTC_DOGE') prices['LTC_DOGE_DOGE'] = await fetchCoinUsdPrice('LTC_DOGE_DOGE');
     }
   } catch (err) {
     return res.status(502).json({ error: `Price oracle unavailable: ${err.message}` });
@@ -230,7 +236,7 @@ async function claimRewards(req, res) {
     const params = targetPool ? [userId, targetPool] : [userId];
     const ledgerFilter = targetPool ? 'AND p.target_pool = $2' : '';
     const ledgerResult = await client.query(
-      `SELECT l.ledger_id, l.calculated_reward_1, p.target_pool
+      `SELECT l.ledger_id, l.calculated_reward_1, l.calculated_reward_2, p.target_pool
          FROM user_rewards_ledger l
          JOIN real_pool_payouts p USING (payout_id)
         WHERE l.user_id = $1 AND l.status = 'UNCLAIMED' AND l.withdrawal_id IS NULL ${ledgerFilter}
@@ -250,7 +256,12 @@ async function claimRewards(req, res) {
         await client.query('ROLLBACK');
         return res.status(502).json({ error: `Price oracle unavailable for ${row.target_pool}` });
       }
-      const usdc = round4(Number(row.calculated_reward_1) * price);
+      const dogePrice = row.target_pool === 'LTC_DOGE' ? (prices['LTC_DOGE_DOGE'] || 0) : 0;
+      if (row.target_pool === 'LTC_DOGE' && Number(row.calculated_reward_2 || 0) > 0 && !dogePrice) {
+        await client.query('ROLLBACK');
+        return res.status(502).json({ error: 'Price oracle unavailable for dogecoin' });
+      }
+      const usdc = round4(Number(row.calculated_reward_1) * price + Number(row.calculated_reward_2 || 0) * dogePrice);
       totalUsdc = round4(totalUsdc + usdc);
       claims.push({ ledger_id: row.ledger_id, usdc, pool: row.target_pool });
     }

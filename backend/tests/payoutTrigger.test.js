@@ -2,7 +2,19 @@ jest.mock('../config/db', () => ({
   pool: { query: jest.fn(), connect: jest.fn() },
 }));
 
-const { computePayoutEvent } = require('../services/payoutTrigger');
+const { computePayoutEvent, WATCHES } = require('../services/payoutTrigger');
+
+describe('DOGE merged watch (011)', () => {
+  test('LTC_DOGE_DOGE watches the platform DOGE wallet and routes to merged distribution', () => {
+    const cfg = WATCHES.LTC_DOGE_DOGE;
+    expect(cfg).toBeTruthy();
+    expect(cfg.walletEnv).toBe('MRR_PLATFORM_WALLET_DOGE');
+    expect(cfg.distribute).toBe('merged');
+    expect(cfg.gamePool).toBe('LTC_DOGE');
+    // Blockcypher returns DOGE in smallest units — normalize to whole DOGE.
+    expect(cfg.balanceOf({ balance: 123456789 })).toBeCloseTo(1.23456789, 6);
+  });
+});
 
 describe('computePayoutEvent (payout trigger decision logic)', () => {
   test('no baseline → baseline (no event)', () => {

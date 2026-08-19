@@ -10,7 +10,7 @@ const COIN_NAMES = {
 export default function MiningRoomCard({
   title, pool, rig, pendingReward, upgradeCost,
   maintenanceRate, onUpgrade, onClaim, onWithdraw, onReinvest,
-  mineAtLoss, onToggleLoss, discountPct,
+  mineAtLoss, onToggleLoss, discountPct, pendingDoge,
 }) {
   const [animating, setAnimating] = useState(false);
   const level = Number(rig?.level) || 1;
@@ -47,6 +47,12 @@ export default function MiningRoomCard({
           <span className="stat-label">Pending Yield</span>
           <span className="stat-value accent">{Number(pendingReward).toFixed(8)}</span>
         </div>
+        {Number(pendingDoge) > 0 && (
+          <div className="stat">
+            <span className="stat-label">Pending DOGE</span>
+            <span className="stat-value accent">{Number(pendingDoge).toFixed(8)}</span>
+          </div>
+        )}
         {dailyMaintenance !== null && (
           <div className="stat">
             <span className="stat-label">Maintenance</span>
