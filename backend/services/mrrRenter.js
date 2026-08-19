@@ -149,6 +149,9 @@ async function findAffordableRig(algorithm, budgetBtc) {
   });
   const records = data?.data?.records || [];
   for (const rig of records) {
+    // Defensive: the API's rented=false filter is not always honored; skip
+    // any rig that is currently rented (status.rented / rented flag).
+    if (rig?.status?.rented === true || rig?.rented === true) continue;
     const hourly = Number(rig?.price?.BTC?.hour || 0);
     if (!hourly) continue;
     const minHours = Number(rig?.minhours || 0);
@@ -256,6 +259,14 @@ async function placeHashpowerOrder(targetPool, spendBtcAmount) {
         currency: 'BTC',
       }
     );
+
+    // MRR returns {success:false, data:{message}} for rejections (e.g. rig
+    // already rented between scan and order). NEVER swallow that as success —
+    // the caller refunds the user only when success:false is returned.
+    if (!result?.success) {
+      const msg = result?.data?.message || result?.data?.data?.message || 'MRR rental request rejected';
+      return { success: false, mode: 'live', error: msg };
+    }
 
     const orderId =
       result?.data?.rental?.id ||

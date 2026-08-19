@@ -201,6 +201,43 @@ describe('placeHashpowerOrder (MRR)', () => {
     expect(axios.mock.calls.every(([c]) => c.method === 'GET')).toBe(true);
   });
 
+  test('live order: surfaces MRR rental rejection instead of false success', async () => {
+    setEnv({ NODE_ENV: 'production', LIVE_ORDERS: '1', PROFILE_ZHASH: '40073' });
+    axios.mockImplementation(({ method, url }) => {
+      if (method === 'GET') {
+        return Promise.resolve({
+          data: {
+            success: true,
+            data: {
+              records: [
+                {
+                  id: '274435',
+                  name: 'Cheap Zhash Rig',
+                  price: { BTC: { hour: '0.000002181767' } },
+                  minhours: 24,
+                  maxhours: 120,
+                  hashrate: { advertised: { nice: '30.00M' } },
+                },
+              ],
+            },
+          },
+        });
+      }
+      if (url.endsWith('/rental') && method === 'PUT') {
+        return Promise.resolve({
+          data: { success: false, data: { message: 'Rig is already rented' } },
+        });
+      }
+      return Promise.reject(new Error(`unexpected call ${method} ${url}`));
+    });
+
+    const result = await placeHashpowerOrder('ZCASH', 0.000475);
+    expect(result.success).toBe(false);
+    expect(result.mode).toBe('live');
+    expect(result.error).toMatch(/already rented/);
+    expect(result.orderId).toBeUndefined();
+  });
+
   test('live order: requires a configured pool profile for the algorithm', async () => {
     setEnv({ NODE_ENV: 'production', LIVE_ORDERS: '1', PROFILE_ZHASH: '' });
     const result = await placeHashpowerOrder('ZCASH', 0.000475);
