@@ -182,6 +182,12 @@ describe('upgradeRig — currency conversion + order loop', () => {
     const statusUpdate = queries.find((q) => q.sql.includes("status = 'REFUNDED'"));
     expect(statusUpdate).toBeTruthy();
     expect(statusUpdate.params[0]).toMatch(/5191/);
+
+    // The rig must be reverted to the pre-upgrade level (level 1) so the user
+    // doesn't keep a free upgrade after a refund.
+    const rigRevert = queries.find((q) => q.sql.includes('UPDATE virtual_rigs SET level'));
+    expect(rigRevert).toBeTruthy();
+    expect(rigRevert.params[0]).toBe(1);
   });
 
   test('duplicate request_id returns the stored order without double-charging', async () => {

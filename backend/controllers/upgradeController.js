@@ -213,6 +213,7 @@ async function upgradeRig(req, res) {
   const client = await pool.connect();
   let orderRecordId = null;
   let walletId = null;
+  let userId = null;
   let newBalance = null;
   let nextTier = null;
   let protocolFeeUsdc = null;
@@ -229,7 +230,7 @@ async function upgradeRig(req, res) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'User not found' });
     }
-    const userId = userResult.rows[0].user_id;
+    userId = userResult.rows[0].user_id;
 
     const walletResult = await client.query(
       'SELECT wallet_id, usdc_balance FROM user_wallets WHERE user_id = $1 FOR UPDATE',
@@ -330,7 +331,9 @@ async function upgradeRig(req, res) {
   const orderResult = await placeHashpowerOrder(targetPool, spendBtcAmount);
 
   if (!orderResult.success) {
-    // Compensate: refund the user and mark the order row FAILED/REFUNDED.
+    // Compensate: refund the user, revert the rig level, and mark the order
+    // row FAILED/REFUNDED. The rig must NOT keep the upgrade the user didn't
+    // pay for (money back + free rig = financial bug).
     const refundClient = await pool.connect();
     try {
       await refundClient.query('BEGIN');
@@ -342,8 +345,21 @@ async function upgradeRig(req, res) {
         `UPDATE hashrate_orders SET status = 'REFUNDED', failure_reason = $1, updated_at = CURRENT_TIMESTAMP WHERE order_id = $2`,
         [orderResult.error, orderRecordId]
       );
+      // Revert the rig to its pre-upgrade level (or delete if it was just created).
+      const prevTier = UPGRADE_TIERS.find((t) => t.level === nextTier.level - 1) || null;
+      if (prevTier) {
+        await refundClient.query(
+          'UPDATE virtual_rigs SET level = $1, virtual_hashrate = $2, updated_at = CURRENT_TIMESTAMP WHERE user_id = $3 AND target_pool = $4',
+          [prevTier.level, prevTier.hashrate, userId, targetPool]
+        );
+      } else {
+        await refundClient.query(
+          'DELETE FROM virtual_rigs WHERE user_id = $1 AND target_pool = $2',
+          [userId, targetPool]
+        );
+      }
       await refundClient.query('COMMIT');
-      console.error(`Order failed for request ${requestId}; ${nextTier.cost} USDC refunded to ${walletAddress}`);
+      console.error(`Order failed for request ${requestId}; ${nextTier.cost} USDC refunded and rig reverted for ${walletAddress}`);
     } catch (refundErr) {
       await refundClient.query('ROLLBACK');
       console.error('❌ CRITICAL: refund failed after order error:', refundErr.message);
