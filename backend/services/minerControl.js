@@ -36,7 +36,11 @@ function isLocalMiner() {
 
 function isRunning() {
   return new Promise((resolve) => {
-    exec('pgrep -f "xmrig -c" >/dev/null 2>&1', (err) => resolve(err === null));
+    // pgrep -x matches the process NAME exactly — never the shell that ran
+    // this command. (pgrep -f "xmrig -c" self-matched the invoking sh -c
+    // because its command line contained the pattern → always "running",
+    // so Start silently never bootstrapped. Hit 2026-08-19.)
+    exec('pgrep -x xmrig >/dev/null 2>&1', (err) => resolve(err === null));
   });
 }
 
