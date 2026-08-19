@@ -133,6 +133,7 @@ describe('placeHashpowerOrder (MRR)', () => {
                 {
                   id: '274435',
                   name: 'Cheap Zhash Rig',
+                  rpi: '98.5',
                   price: { BTC: { hour: '0.000002181767' } },
                   minhours: 24,
                   maxhours: 120,
@@ -146,10 +147,10 @@ describe('placeHashpowerOrder (MRR)', () => {
       if (url.endsWith('/rental') && method === 'PUT') {
         // Correct MRR v2 rental shape (per apidoc): PUT /rental with
         // {rig, length, profile, currency}. The renter extends the rental
-        // to spend the full user budget: 0.000475 / 0.000002181767/h
-        // ≈ 217h -> clamped to maxhours 120.
+        // to spend the user budget but is capped by MRR_MAX_RENTAL_HOURS
+        // (default 72): 0.000475 / 0.000002181767/h ≈ 217h → capped to 72.
         expect(JSON.parse(data).rig).toBe('274435');
-        expect(JSON.parse(data).length).toBe(120);
+        expect(JSON.parse(data).length).toBe(72);
         expect(JSON.parse(data).profile).toBe('40073');
         expect(JSON.parse(data).currency).toBe('BTC');
         return Promise.resolve({
@@ -163,6 +164,9 @@ describe('placeHashpowerOrder (MRR)', () => {
     expect(result.success).toBe(true);
     expect(result.mode).toBe('live');
     expect(result.orderId).toBe('rental-999');
+    expect(result.rigName).toBe('Cheap Zhash Rig');
+    expect(result.rigRpi).toBe(98.5);
+    expect(result.rigHours).toBe(72);
 
     // GET (market scan) + PUT (rental) — and GET carried no body data.
     const getCall = axios.mock.calls.find(([c]) => c.method === 'GET');
@@ -256,7 +260,7 @@ describe('placeHashpowerOrder (MRR)', () => {
 });
 
 describe('findAffordableRig', () => {
-  test('picks the cheapest rig whose minimum cost fits the budget and extends within it', async () => {
+  test('picks the cheapest eligible rig, capped at MRR_MAX_RENTAL_HOURS (72)', async () => {
     axios.mockResolvedValue({
       data: {
         success: true,
@@ -270,9 +274,60 @@ describe('findAffordableRig', () => {
     });
     const fit = await findAffordableRig('zhash', 0.000475);
     expect(fit.rigId).toBe('a');
-    // 0.000475 / 0.000002 = 237h -> clamped to maxhours 120 -> cost 0.00024 <= budget
-    expect(fit.length).toBe(120);
-    expect(fit.cost).toBe(0.00024);
+    // 0.000475 / 0.000002 = 237h -> capped at MAX_RENTAL_HOURS 72 (not maxhours 120)
+    expect(fit.length).toBe(72);
+    expect(fit.cost).toBe(0.000144);
+  });
+
+  test('skips untested rigs (rpi "new") and the known-idle RPI-100+ family', async () => {
+    axios.mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          records: [
+            { id: 'newrig', rpi: 'new', price: { BTC: { hour: '0.0000001' } }, minhours: 3, maxhours: 24 },
+            { id: 'rpifam', name: 'ZHASH___RPI-100+___AUTOEXTEND___AUTOSTART___3', rpi: '97.37', price: { BTC: { hour: '0.0000001' } }, minhours: 3, maxhours: 24 },
+            { id: 'good', rpi: '98.00', price: { BTC: { hour: '0.000001' } }, minhours: 3, maxhours: 24 },
+          ],
+        },
+      },
+    });
+    const fit = await findAffordableRig('zhash', 0.000475);
+    expect(fit.rigId).toBe('good');
+    expect(fit.rigRpi).toBe(98);
+  });
+
+  test('prefers a verified high-rpi rig over a cheaper low-rpi rig', async () => {
+    axios.mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          records: [
+            { id: 'low', rpi: '80.00', price: { BTC: { hour: '0.0000005' } }, minhours: 3, maxhours: 24 },
+            { id: 'high', rpi: '99.00', price: { BTC: { hour: '0.000002' } }, minhours: 3, maxhours: 24 },
+          ],
+        },
+      },
+    });
+    const fit = await findAffordableRig('zhash', 0.000475);
+    expect(fit.rigId).toBe('high');
+    expect(fit.rigRpi).toBe(99);
+  });
+
+  test('falls back to unknown-rpi rigs when no verified rig fits', async () => {
+    axios.mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          records: [
+            { id: 'unknown', price: { BTC: { hour: '0.000002' } }, minhours: 3, maxhours: 24 },
+          ],
+        },
+      },
+    });
+    const fit = await findAffordableRig('zhash', 0.000475);
+    expect(fit.rigId).toBe('unknown');
+    expect(fit.rigRpi).toBeNull();
   });
 
   test('returns null when no rig fits the budget', async () => {

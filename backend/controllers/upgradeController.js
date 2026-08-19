@@ -32,6 +32,7 @@ const ORDER_SELECT = `
   SELECT h.order_id, h.status, h.nicehash_order_id, h.sandbox, h.usdc_cost,
          h.protocol_fee_usdc, h.btc_spent, h.btc_spot_price, h.price_feed,
          h.price_is_usdc_pair, h.failure_reason, h.request_id, h.marketplace,
+         h.rig_name, h.rig_rpi, h.rig_hours,
          r.level, r.virtual_hashrate
   FROM hashrate_orders h
   LEFT JOIN virtual_rigs r ON r.user_id = h.user_id AND r.target_pool = h.target_pool
@@ -49,6 +50,9 @@ function duplicateResponse(row) {
     price_feed: row.price_feed,
     protocol_fee_usdc: Number(row.protocol_fee_usdc),
     sandbox: Boolean(row.sandbox),
+    rig_name: row.rig_name || null,
+    rig_rpi: row.rig_rpi || null,
+    rig_hours: row.rig_hours ? Number(row.rig_hours) : null,
     level: row.level ? Number(row.level) : null,
     hashrate: row.virtual_hashrate ? Number(row.virtual_hashrate) : null,
     request_id: row.request_id,
@@ -374,9 +378,19 @@ async function upgradeRig(req, res) {
   const status = orderResult.mode === 'live' ? 'PLACED' : 'SIMULATED';
   await pool.query(
     `UPDATE hashrate_orders
-       SET nicehash_order_id = $1, status = $2, sandbox = $3, updated_at = CURRENT_TIMESTAMP
-     WHERE order_id = $4`,
-    [orderResult.orderId || null, status, orderResult.mode !== 'live', orderRecordId]
+       SET nicehash_order_id = $1, status = $2, sandbox = $3,
+           rig_name = $4, rig_rpi = $5, rig_hours = $6,
+           updated_at = CURRENT_TIMESTAMP
+     WHERE order_id = $7`,
+    [
+      orderResult.orderId || null,
+      status,
+      orderResult.mode !== 'live',
+      orderResult.rigName || null,
+      orderResult.rigRpi != null ? String(orderResult.rigRpi) : null,
+      orderResult.rigHours || null,
+      orderRecordId,
+    ]
   );
 
   let niceHashStatus = null;
@@ -401,6 +415,9 @@ async function upgradeRig(req, res) {
     protocol_fee_usdc: protocolFeeUsdc,
     nicehash_order_id: orderResult.orderId || null,
     marketplace: providerName,
+    rig_name: orderResult.rigName || null,
+    rig_rpi: orderResult.rigRpi != null ? String(orderResult.rigRpi) : null,
+    rig_hours: orderResult.rigHours || null,
     order_status: status,
     nicehash_status: niceHashStatus,
     sandbox: orderResult.mode !== 'live',

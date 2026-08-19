@@ -133,44 +133,93 @@ async function getPoolProfiles() {
 }
 
 /**
- * Finds the cheapest available rig for an algorithm that fits a BTC budget.
- * Uses the rig's minimum hours (minhours) as the floor; extends the rental
- * length up to maxhours while the hourly cost stays within the budget.
+ * Rig selection quality rules (learned the hard way 2026-08-19: two rentals
+ * on the ZHASH___RPI-100+___ family showed poolstatus "online" for hours
+ * while average hashrate stayed 0.00 — ~$50.60 spent on connected-but-idle
+ * rigs, and MRR's API has NO cancel/refund endpoint).
  *
- * @returns {Promise<{rigId, rigName, hourly, length, cost, hashrate}|null>}
+ * 1. Scan more of the market (limit 50) instead of the 10 cheapest.
+ * 2. Skip rigs with no track record (rpi === 'new'), the known-idle
+ *    "RPI-100+" family, already-rented rigs, and zero-hourly rows.
+ * 3. Among budget fits, prefer verified rigs by rpi tier:
+ *    rpi >= 95 first, then >= 90, then any eligible (missing rpi counts as
+ *    unknown, ranked below verified but still eligible).
+ * 4. Cap rental length at MRR_MAX_RENTAL_HOURS (default 72) so a dud rig
+ *    can never consume the whole budget before it is verified — the cost of
+ *    discovering a bad rig is at most capHours × hourly rate.
+ *
+ * @returns {Promise<{rigId, rigName, rigRpi, hourly, length, cost, hashrate}|null>}
  */
+const MAX_RENTAL_HOURS = Number(process.env.MRR_MAX_RENTAL_HOURS || 72);
+
+function isRpiNumber(value) {
+  return value !== undefined && value !== null && String(value).trim() !== '' && !/^new$/i.test(String(value).trim());
+}
+
+function rpiOf(rig) {
+  const raw = rig?.rpi;
+  if (!isRpiNumber(raw)) return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
 async function findAffordableRig(algorithm, budgetBtc) {
   const data = await makeMrrRequest('GET', '/rig', {
     type: algorithm,
     rented: 'false',
     orderby: 'price',
     orderdir: 'asc',
-    limit: '10',
+    limit: '50',
   });
   const records = data?.data?.records || [];
+
+  const candidates = [];
   for (const rig of records) {
     // Defensive: the API's rented=false filter is not always honored; skip
     // any rig that is currently rented (status.rented / rented flag).
     if (rig?.status?.rented === true || rig?.rented === true) continue;
+    const name = String(rig?.name || '');
+    // Known-idle family (verified 2026-08-19): connected but 0 hashrate.
+    if (/RPI-100\+/i.test(name)) continue;
+    // Untested rigs (rpi 'new') have no track record — skip by default.
+    if (/^new$/i.test(String(rig?.rpi || '').trim())) continue;
     const hourly = Number(rig?.price?.BTC?.hour || 0);
     if (!hourly) continue;
     const minHours = Number(rig?.minhours || 0);
     const maxHours = Number(rig?.maxhours || Math.max(minHours, 24));
     if (!minHours) continue;
-    const length = Math.min(Math.max(Math.floor(budgetBtc / hourly), minHours), maxHours);
+    const length = Math.min(
+      Math.max(Math.floor(budgetBtc / hourly), minHours),
+      maxHours,
+      MAX_RENTAL_HOURS
+    );
     const cost = to8(length * hourly);
     if (cost <= budgetBtc) {
-      return {
+      candidates.push({
         rigId: rig.id,
-        rigName: rig.name || '',
+        rigName: name,
+        rigRpi: rpiOf(rig),
         hourly,
         length,
         cost,
         hashrate: rig.hashrate || null,
-      };
+      });
     }
   }
-  return null;
+  if (candidates.length === 0) return null;
+
+  const tier = (c) => (c.rigRpi === null ? 0 : c.rigRpi >= 95 ? 2 : c.rigRpi >= 90 ? 1 : 0);
+  // Cheapest within the best rpi tier (ties broken by lower hourly).
+  candidates.sort((a, b) => tier(b) - tier(a) || a.hourly - b.hourly || a.cost - b.cost);
+  const pick = candidates[0];
+  if (tier(pick) === 0) {
+    console.warn('⚠️ MRR: no verified rig (rpi≥90) within budget — falling back to lowest-rpi candidate', {
+      rig: pick.rigName,
+      rpi: pick.rigRpi,
+      budgetBtc,
+    });
+  }
+  return pick;
 }
 
 /** Rental status lookup for audit/UI. */
@@ -279,6 +328,9 @@ async function placeHashpowerOrder(targetPool, spendBtcAmount) {
       success: true,
       mode: 'live',
       orderId,
+      rigName: fit.rigName,
+      rigRpi: fit.rigRpi,
+      rigHours: fit.length,
       mrrResponse: result,
     };
   } catch (err) {
