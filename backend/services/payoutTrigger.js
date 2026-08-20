@@ -30,13 +30,14 @@ const EPS = 1e-8;
 // Pool minimum payout thresholds (COIN units) — the amount at which each pool
 // sends the wallet its accrued earnings. Sources verified 2026-08-20:
 //   KASPA 50 KAS    (2Miners, verified live in prior sessions)
-//   ZCASH 0.01 ZEC  (2Miners, minerstat + bt-miners pool comparison)
+//   ZCASH 0.1 ZEC   (2Miners live config: allowedMinPayout=minPayout=1e7
+//                    zatoshi = 0.1 ZEC; previously hardcoded 0.01 — wrong)
 //   XMR   0.1 XMR   (herominers, XMR_MIN_PAYOUT env)
 //   LTC   0.02 LTC  (F2Pool help center payout-thresholds article)
 //   DOGE  (merged bonus — F2Pool does not publish a DOGE threshold; the
 //          on-chain arrival watch shows the total, no ETA)
 const PAYOUT_MIN = {
-  ZCASH: Number(process.env.ZCASH_MIN_PAYOUT || 0.01),
+  ZCASH: Number(process.env.ZCASH_MIN_PAYOUT || 0.1),
   KASPA: Number(process.env.KASPA_MIN_PAYOUT || 50),
   XMR: Number(process.env.XMR_MIN_PAYOUT || 0.1),
   LTC_DOGE: Number(process.env.LTC_MIN_PAYOUT || 0.02),

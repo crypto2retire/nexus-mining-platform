@@ -40,7 +40,7 @@ describe('2Miners watches (ZEC/KAS) — stats.balance fix + ATOM normalization (
     expect(WATCHES.KASPA.mode).toBe('unpaid-drop');
     expect(WATCHES.ZCASH.mode).toBe('unpaid-drop');
     expect(WATCHES.KASPA.minPayout).toBe(50);
-    expect(WATCHES.ZCASH.minPayout).toBeCloseTo(0.01, 4);
+    expect(WATCHES.ZCASH.minPayout).toBeCloseTo(0.1, 4); // 2Miners live config: 1e7 zatoshi
   });
 });
 

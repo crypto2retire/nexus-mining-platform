@@ -21,6 +21,7 @@ export default function MiningRoomCard({
   const hashrate = Number(rig?.virtual_hashrate) || 0;
   const backing = realBacking && realBacking.real_hash != null ? realBacking : null;
   const rentalActive = rig?.rental_active === true;
+  const roomHasRealRig = backing?.active_rentals && backing.active_rentals.length > 0;
   const hoursLeft = rig?.rental_hours_left != null ? Number(rig.rental_hours_left) : 0;
 
   // Pool payout status: what the pool owes the wallet, the pool's minimum
@@ -69,8 +70,8 @@ export default function MiningRoomCard({
     <div className="mining-card">
       <div className="card-header">
         <h2>{title}</h2>
-        <span className={`status-pill ${rentalActive ? 'active' : hashrate > 0 ? 'active' : 'idle'}`}>
-          {rentalActive ? 'RENTED' : hashrate > 0 ? 'Mining' : 'Not rented'}
+        <span className={`status-pill ${rentalActive ? 'active' : hashrate > 0 ? 'active' : roomHasRealRig ? 'active' : 'idle'}`}>
+          {rentalActive ? 'RENTED' : hashrate > 0 ? 'Mining' : roomHasRealRig ? 'RIG RUNNING' : 'Not rented'}
         </span>
       </div>
       <div className="card-stats">

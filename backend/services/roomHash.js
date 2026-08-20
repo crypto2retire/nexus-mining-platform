@@ -70,10 +70,23 @@ async function rentalRealGhs(mrrRentalId) {
  * @returns {Promise<number|null>} null when the pool can't be measured
  */
 async function fetchLiveRealHash(pool, activeRentals = []) {
-  if (pool === 'LTC_DOGE') {
+  if (pool === 'LTC_DOGE' || pool === 'ZCASH') {
+    // MRR rental average (what the rig itself reports, steady) is the
+    // operator-facing number — MRR's own page shows "21.33K" while the pool
+    // API's currentHashrate for a tiny equihash rig swings 2K→55K sample to
+    // sample. When a rental exists, prefer its average; fall back to the
+    // pool wallet API (ZEC only) if no rental is registered.
     let total = 0;
     for (const r of activeRentals) {
       if (r.mrr_rental_id) total += await rentalRealGhs(r.mrr_rental_id);
+    }
+    if (total > 0) {
+      return pool === 'ZCASH' ? total * 1e3 : total; // GH/s -> KH/s for ZEC
+    }
+    if (pool === 'ZCASH') {
+      const data = await fetchPoolAccount(pool);
+      if (!data || data.currentHashrate == null) return null;
+      return Number(data.currentHashrate) / 1e3; // H/s -> KH/s
     }
     return total;
   }
