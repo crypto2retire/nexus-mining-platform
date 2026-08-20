@@ -19,7 +19,6 @@ const POOL_KEYS = ['ZCASH', 'KASPA', 'LTC_DOGE'];
 export default function AdminPanel({ wallet }) {
   const [withdrawals, setWithdrawals] = useState(null);
   const [payoutStatus, setPayoutStatus] = useState(null);
-  const [minerStatus, setMinerStatus] = useState(null);
   const [stats, setStats] = useState(null);
   const [backing, setBacking] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -38,16 +37,14 @@ export default function AdminPanel({ wallet }) {
 
   const loadAll = useCallback(async () => {
     try {
-      const [w, p, m, s, b] = await Promise.all([
+      const [w, p, s, b] = await Promise.all([
         fetch(`${API_BASE}/api/rewards/withdrawals`, { headers }).then((r) => r.json()),
         fetch(`${API_BASE}/api/rewards/payout-status`, { headers }).then((r) => r.json()),
-        fetch(`${API_BASE}/api/miner/status`).then((r) => r.json()),
         fetch(`${API_BASE}/api/admin/stats`, { headers }).then((r) => r.json()),
         fetch(`${API_BASE}/api/admin/backing`, { headers }).then((r) => r.json()),
       ]);
       setWithdrawals(w.withdrawals || []);
       setPayoutStatus(p);
-      setMinerStatus(m);
       setStats(s);
       setBacking(b.backing || null);
     } catch (e) {
@@ -111,25 +108,6 @@ export default function AdminPanel({ wallet }) {
       const j = await r.json();
       if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
       flash('Payout check complete — refresh status below');
-      loadAll();
-    } catch (e) {
-      flash(`Error: ${e.message}`);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const setMiner = async (action) => {
-    setBusy(true);
-    try {
-      const r = await fetch(`${API_BASE}/api/miner/${action}`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({}),
-      });
-      const j = await r.json();
-      if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
-      flash(`Miner ${action} request sent`);
       loadAll();
     } catch (e) {
       flash(`Error: ${e.message}`);
@@ -246,7 +224,7 @@ export default function AdminPanel({ wallet }) {
               </table>
               <p className="admin-miner">
                 <strong>Real rate</strong> comes from the pool's own wallet API (ZEC/KAS), the rented rig's live
-                average (LTC), or the Mac miner push (XMR). Refreshes every 60s.
+                average (LTC), or the F2Pool worker stats (DOGE). Refreshes every 60s.
               </p>
             </>
           )}
@@ -331,29 +309,6 @@ export default function AdminPanel({ wallet }) {
           <button className="btn-small" disabled={busy} onClick={checkPayouts}>
             Check payouts now
           </button>
-        </div>
-
-        {/* Miner controls */}
-        <div className="admin-card">
-          <h3>Platform miner</h3>
-          {minerStatus ? (
-            <p className="admin-miner">
-              <strong>Status:</strong> {minerStatus.online ? '🟢 mining' : '🔴 offline'}
-              {minerStatus.hashrate ? ` · ${minerStatus.hashrate}` : ''}
-              {minerStatus.algo ? ` · ${minerStatus.algo}` : ''}
-              {minerStatus.pool ? ` · ${minerStatus.pool}` : ''}
-            </p>
-          ) : (
-            <p className="admin-empty">Loading…</p>
-          )}
-          <div className="admin-actions">
-            <button className="btn-small" disabled={busy} onClick={() => setMiner('start')}>
-              Start miner
-            </button>
-            <button className="btn-small btn-danger" disabled={busy} onClick={() => setMiner('stop')}>
-              Stop miner
-            </button>
-          </div>
         </div>
       </div>
     </section>
