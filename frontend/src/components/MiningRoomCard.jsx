@@ -103,9 +103,7 @@ export default function MiningRoomCard({
         >
           {level >= 5
             ? 'Max Level'
-            : pool === 'XMR'
-              ? `${rig ? 'Upgrade Rig' : 'Buy Miner'} — Free${discountPct > 0 ? ` (${discountPct}% off)` : ''}`
-              : `${rig ? 'Upgrade Rig' : 'Buy Miner'} — $${upgradeCost ?? '—'}${discountPct > 0 ? ` (${discountPct}% off)` : ''}`}
+            : `${rig ? 'Upgrade Rig' : 'Buy Miner'} — $${discountPct > 0 && upgradeCost != null ? (upgradeCost * (1 - discountPct / 100)).toFixed(2) : (upgradeCost ?? '—')}${discountPct > 0 ? ` (${discountPct}% off)` : ''}`}
         </button>
         <button
           className="btn-secondary"
