@@ -1,6 +1,6 @@
 const axios = require('axios');
 const { pool } = require('../config/db');
-const { distributePayout, distributeMergedReward } = require('./rewardDistributor');
+const { distributePayout, distributeMergedReward, recordPoolPayment } = require('./rewardDistributor');
 
 /**
  * Payout trigger — watches the platform mining wallets at their pools and
@@ -224,6 +224,19 @@ async function checkPool(poolKey) {
       // Keep the baseline unchanged so the payout isn't lost — retry next tick
       // with a network-hashrate fetch (or accept null and record it).
       console.warn(`${poolKey}: detected payout ${event.amount} but no network hashrate; recording with null`);
+    }
+    if (process.env.ACCRUAL_DISTRIBUTION_ENABLED === '1') {
+      // ACCRUAL mode (016): the accrual distributor already credited users as
+      // the room accrued — the pool settling now only records the basis row
+      // (keeps earnedTotal continuous). Crediting again = double payment.
+      await recordPoolPayment(cfg.gamePool || poolKey, event.amount, netHash ?? 0);
+      await upsertBaseline(poolKey, balance, event.amount, new Date());
+      return {
+        pool: poolKey,
+        status: 'payout-settled',
+        amount: event.amount,
+        note: 'recorded as settlement (accrual mode)',
+      };
     }
     const result = cfg.distribute === 'merged'
       ? await distributeMergedReward(cfg.gamePool || poolKey, event.amount, netHash ?? 0)

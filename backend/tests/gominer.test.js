@@ -27,7 +27,7 @@ jest.mock('axios', () => ({ get: jest.fn() }));
 const { pool } = require('../config/db');
 const axios = require('axios');
 const { fetchLiveRealHash } = require('../services/roomHash');
-const { distributePayout, distributeMergedReward } = require('../services/rewardDistributor');
+const { distributePayout, distributeMergedReward, distributeAccrued } = require('../services/rewardDistributor');
 const { reinvestRig } = require('../controllers/upgradeController');
 const { getLiveBtcPrice } = require('../services/priceOracle');
 const { placeHashpowerOrder } = require('../services/hashrateRenter');
@@ -259,6 +259,97 @@ describe('distributeMergedReward — merged DOGE distribution', () => {
     );
     expect(residual).toBeTruthy();
     expect(Number(residual[1][0])).toBeCloseTo(87.8516, 3);
+  });
+});
+
+// ---- distributeAccrued: daily in-game payouts (016, 2026-08-20) -----------
+
+describe('distributeAccrued — daily accrual payouts (016)', () => {
+  function accrualClient({ unpaidNow = 1.7, earnedLast = 1.5 } = {}) {
+    const now = Date.now();
+    const start = new Date(now - 6 * 3600 * 1000); // 6h since last run
+    fetchLiveRealHash.mockResolvedValue(REAL_HASH);
+    pool.query.mockResolvedValue({ rowCount: 0, rows: [] });
+    const client = {
+      query: jest.fn(async (sql, params = []) => {
+        if (sql === 'BEGIN' || sql === 'COMMIT' || sql === 'ROLLBACK') return { rowCount: 1, rows: [] };
+        if (sql.includes('FROM room_accrual WHERE pool = $1 FOR UPDATE')) {
+          return { rowCount: 1, rows: [{ earned_total: String(earnedLast), last_distributed_at: start }] };
+        }
+        if (sql.includes('SELECT last_balance FROM payout_watch')) {
+          return { rowCount: 1, rows: [{ last_balance: String(unpaidNow) }] };
+        }
+        if (sql.includes('FROM real_pool_payouts') && sql.includes('source')) {
+          return { rowCount: 1, rows: [{ paid: '0' }] };
+        }
+        if (sql.includes('INSERT INTO real_pool_payouts')) return { rowCount: 1, rows: [{ payout_id: 'payout-accrual' }] };
+        if (sql.includes('INSERT INTO real_rig_hashrate_history')) return { rowCount: 1, rows: [] };
+        if (sql.includes('SELECT changed_at, hashrate') && sql.includes('real_rig_hashrate_history')) {
+          return { rowCount: 1, rows: [{ changed_at: start, hashrate: REAL_HASH }] };
+        }
+        if (sql.includes('FROM rig_hashrate_history') && sql.includes('SELECT user_id, changed_at, hashrate')) {
+          return { rowCount: 1, rows: [{ user_id: 'user-1', changed_at: start, hashrate: '25.0000' }] };
+        }
+        if (sql.includes('SELECT user_id, virtual_hashrate FROM virtual_rigs')) return { rowCount: 0, rows: [] };
+        if (sql.includes('INSERT INTO user_rewards_ledger')) return { rowCount: 1, rows: [] };
+        if (sql.includes('INSERT INTO protocol_revenue_ledger')) return { rowCount: 1, rows: [] };
+        if (sql.includes('UPDATE room_accrual')) return { rowCount: 1, rows: [] };
+        if (sql.includes('UPDATE real_pool_payouts')) return { rowCount: 1, rows: [] };
+        throw new Error(`unexpected accrual sql: ${sql}`);
+      }),
+      release: jest.fn(),
+    };
+    pool.connect.mockResolvedValue(client);
+    return client;
+  }
+
+  test('distributes ONLY the new accrued production (delta), not the whole balance', async () => {
+    const client = accrualClient({ unpaidNow: 1.7, earnedLast: 1.5 });
+    const result = await distributeAccrued('KASPA');
+
+    expect(result.status).toBe('distributed');
+    expect(result.delta).toBeCloseTo(0.2, 6);
+
+    // Payout row is an ACCRUAL source (never counts toward the E basis).
+    const payoutInsert = client.query.mock.calls.find(([sql]) => sql.includes('INSERT INTO real_pool_payouts'));
+    expect(payoutInsert[0]).toContain("'ACCRUAL'");
+    expect(Number(payoutInsert[1][1])).toBeCloseTo(0.2, 6);
+
+    // User credited their slice of the 0.2 delta: 25 GH/s x 6h over real
+    // 195.5 x 6h = 12.79% of 0.2 = 0.02558 gross -> net 0.02430.
+    const ledger = client.query.mock.calls.find(([sql]) => sql.includes('INSERT INTO user_rewards_ledger'));
+    expect(Number(ledger[1][2])).toBeCloseTo(0.0243, 4);
+
+    // State advanced so the NEXT run distributes from the new baseline.
+    const stateUpdate = client.query.mock.calls.find(([sql]) => sql.includes('UPDATE room_accrual'));
+    expect(Number(stateUpdate[1][0])).toBeCloseTo(1.7, 6);
+  });
+
+  test('no new accrual -> no distribution, state untouched', async () => {
+    const client = accrualClient({ unpaidNow: 1.5, earnedLast: 1.5 });
+    const result = await distributeAccrued('KASPA');
+    expect(result.status).toBe('no-change');
+    const inserts = client.query.mock.calls.filter(([sql]) => sql.includes('INSERT INTO user_rewards_ledger'));
+    expect(inserts).toHaveLength(0);
+  });
+
+  test('fresh install (no room_accrual row) -> seeds the baseline and distributes nothing yet', async () => {
+    const now = Date.now();
+    const client = accrualClient({ unpaidNow: 1.7, earnedLast: 1.5 });
+    client.query.mockImplementation(async (sql) => {
+      if (sql === 'BEGIN' || sql === 'COMMIT' || sql === 'ROLLBACK') return { rowCount: 1, rows: [] };
+      if (sql.includes('FROM room_accrual WHERE pool = $1 FOR UPDATE')) return { rowCount: 0, rows: [] };
+      if (sql.includes('SELECT last_balance FROM payout_watch')) return { rowCount: 1, rows: [{ last_balance: '1.7' }] };
+      if (sql.includes('FROM real_pool_payouts') && sql.includes('source')) return { rowCount: 1, rows: [{ paid: '0' }] };
+      if (sql.includes('INSERT INTO room_accrual')) return { rowCount: 1, rows: [] };
+      throw new Error(`unexpected sql: ${sql}`);
+    });
+    const result = await distributeAccrued('KASPA');
+    expect(result.status).toBe('seeded');
+    expect(Number(result.earned_total)).toBeCloseTo(1.7, 6);
+    // No user rows yet — the NEXT run distributes the delta.
+    const seed = client.query.mock.calls.find(([sql]) => sql.includes('INSERT INTO room_accrual'));
+    expect(seed).toBeTruthy();
   });
 });
 

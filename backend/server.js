@@ -6,6 +6,7 @@ const apiRouter = require('./routes/api');
 const { startDepositListener } = require('./services/depositListener');
 const { startPayoutTrigger } = require('./services/payoutTrigger');
 const { startRentalScheduler } = require('./services/rentalScheduler');
+const { startAccrualDistributor } = require('./services/accrualDistributor');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -40,4 +41,5 @@ app.listen(PORT, () => {
   startDepositListener();
   startPayoutTrigger();
   startRentalScheduler();
+  startAccrualDistributor();
 });

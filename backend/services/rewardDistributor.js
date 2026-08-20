@@ -71,6 +71,95 @@ async function bookUnsoldResidual(client, amountCoin, coinUsdPrice, transactionT
  * their time-weighted hashrate credit over the payout period, divided by the
  * ROOM'S REAL hash-hours (hybrid model). The residual stays with the platform.
  */
+/**
+ * Cumulative REAL production earned by a room (the E basis):
+ *     E = current pool unpaid + SUM(pool-payment rows received)
+ * Unpaid resets when the pool pays, so summing both keeps E continuous —
+ * exactly what the accrual distributor distributes delta-wise.
+ */
+async function earnedTotalFor(client, targetPool) {
+  const [unpaid, paid] = await Promise.all([
+    client.query(
+      'SELECT last_balance FROM payout_watch WHERE pool = $1',
+      [targetPool]
+    ),
+    client.query(
+      `SELECT COALESCE(SUM(total_crypto_reward_1), 0) AS paid
+         FROM real_pool_payouts
+        WHERE target_pool = $1 AND source = 'POOL_PAYMENT'`,
+      [targetPool]
+    ),
+  ]);
+  return (
+    Number(unpaid.rows[0]?.last_balance ?? 0) + Number(paid.rows[0]?.paid ?? 0)
+  );
+}
+
+/**
+ * Shared split math: distribute `totalCoin` of the room's production among
+ * active credits pro-rata over REAL hash-hours (95/5, residual to platform).
+ * Must run inside an open transaction with a real_pool_payouts row already
+ * inserted (payoutId links the ledger rows for the audit trail).
+ */
+async function runSplit(client, targetPool, totalCoin, periodStart, periodEnd, payoutId, priceUsd = 0) {
+  const contribs = await contributionsForPool(client, targetPool, periodStart, periodEnd);
+  const totalContribution = contribs.reduce((sum, c) => sum + c.contribution, 0);
+
+  // DENOMINATOR: real hash-hours (hybrid). Fallback to virtual sum only
+  // when no real measurement exists yet (fresh rollout) — log it loudly.
+  const realHashHours = await realHashHoursForPool(client, targetPool, periodStart, periodEnd);
+  const denominator = realHashHours > 0 ? realHashHours : totalContribution;
+  if (realHashHours <= 0) {
+    console.warn(
+      `distribute: ${targetPool} has no real-hash measurements yet — falling back to virtual denominator (${totalContribution}). Install 014 + let the backing monitor run before relying on slices.`
+    );
+  }
+
+  let totalNet = 0;
+  for (const c of contribs) {
+    if (denominator <= 0 || c.contribution <= 0) continue;
+    const sharePct = c.contribution / denominator;
+    const gross = Number(totalCoin) * sharePct;
+    const fee = gross * PROTOCOL_FEE_PCT;
+    const net = gross - fee;
+    totalNet += net;
+
+    await client.query(
+      `INSERT INTO user_rewards_ledger
+        (user_id, payout_id, calculated_reward_1, protocol_fee_taken, status,
+         weighted_contribution, total_contribution, share_pct, maintenance_fee_1)
+       VALUES ($1, $2, $3, $4, 'UNCLAIMED', $5, $6, $7, 0)`,
+      [c.user_id, payoutId, net, fee, c.contribution, denominator, sharePct]
+    );
+    await client.query(
+      'INSERT INTO protocol_revenue_ledger (source_user_id, amount_usdc, transaction_type) VALUES ($1, $2, $3)',
+      [c.user_id, fee, 'MINING_REWARD_FEE']
+    );
+  }
+
+  // Residual = what the room produced that no holder's credit covers —
+  // the operator baseline + unsold capacity. It stays in the platform
+  // wallet; booked here as platform revenue.
+  const residualCoin = Number(totalCoin) - totalNet;
+  if (residualCoin > 0) {
+    await bookUnsoldResidual(client, residualCoin, priceUsd, 'UNSOLD_CAPACITY');
+  }
+
+  await client.query(
+    'UPDATE real_pool_payouts SET total_contribution = $1 WHERE payout_id = $2',
+    [denominator, payoutId]
+  );
+
+  return {
+    payout_id: payoutId,
+    participants: contribs.length,
+    total_contribution: denominator,
+    residual_coin: toSatPrecision(residualCoin),
+    period_start: periodStart.toISOString(),
+    period_end: periodEnd.toISOString(),
+  };
+}
+
 async function distributePayout(targetPool, totalCryptoReward1, totalNetworkHashrate) {
   // Network I/O stays OUTSIDE the transaction (never hold row locks during it):
   // 1) live real hashrate to refresh the denominator ledger,
@@ -119,8 +208,8 @@ async function distributePayout(targetPool, totalCryptoReward1, totalNetworkHash
 
     const payoutResult = await client.query(
       `INSERT INTO real_pool_payouts
-        (target_pool, total_crypto_reward_1, total_network_hashrate, period_start, period_end)
-       VALUES ($1, $2, $3, $4, $5)
+        (target_pool, total_crypto_reward_1, total_network_hashrate, period_start, period_end, source)
+       VALUES ($1, $2, $3, $4, $5, 'POOL_PAYMENT')
        RETURNING payout_id`,
       [targetPool, totalCryptoReward1, totalNetworkHashrate, periodStart, periodEnd]
     );
@@ -136,66 +225,133 @@ async function distributePayout(targetPool, totalCryptoReward1, totalNetworkHash
       }
     }
 
-    const contribs = await contributionsForPool(client, targetPool, periodStart, periodEnd);
-    const totalContribution = contribs.reduce((sum, c) => sum + c.contribution, 0);
-
-    // DENOMINATOR: real hash-hours (hybrid). Fallback to virtual sum only
-    // when no real measurement exists yet (fresh rollout) — log it loudly.
-    const realHashHours = await realHashHoursForPool(client, targetPool, periodStart, periodEnd);
-    const denominator = realHashHours > 0 ? realHashHours : totalContribution;
-    if (realHashHours <= 0) {
-      console.warn(
-        `distribute: ${targetPool} has no real-hash measurements yet — falling back to virtual denominator (${totalContribution}). Install 014 + let the backing monitor run before relying on slices.`
-      );
-    }
-
-    let totalNet = 0;
-    for (const c of contribs) {
-      if (denominator <= 0 || c.contribution <= 0) continue;
-      const sharePct = c.contribution / denominator;
-      const gross = Number(totalCryptoReward1) * sharePct;
-      const fee = gross * PROTOCOL_FEE_PCT;
-      const net = gross - fee;
-      totalNet += net;
-
-      await client.query(
-        `INSERT INTO user_rewards_ledger
-          (user_id, payout_id, calculated_reward_1, protocol_fee_taken, status,
-           weighted_contribution, total_contribution, share_pct, maintenance_fee_1)
-         VALUES ($1, $2, $3, $4, 'UNCLAIMED', $5, $6, $7, 0)`,
-        [c.user_id, payoutId, net, fee, c.contribution, denominator, sharePct]
-      );
-      await client.query(
-        'INSERT INTO protocol_revenue_ledger (source_user_id, amount_usdc, transaction_type) VALUES ($1, $2, $3)',
-        [c.user_id, fee, 'MINING_REWARD_FEE']
-      );
-    }
-
-    // Residual = what the room produced that no holder's credit covers —
-    // the operator baseline + unsold capacity. It stays in the platform
-    // wallet; booked here as platform revenue.
-    const residualCoin = Number(totalCryptoReward1) - totalNet;
-    if (residualCoin > 0) {
-      await bookUnsoldResidual(client, residualCoin, coinUsdPrice, 'UNSOLD_CAPACITY');
-    }
-
-    await client.query(
-      'UPDATE real_pool_payouts SET total_contribution = $1 WHERE payout_id = $2',
-      [denominator, payoutId]
-    );
+    const result = await runSplit(client, targetPool, totalCryptoReward1, periodStart, periodEnd, payoutId, coinUsdPrice);
 
     await client.query('COMMIT');
-    return {
-      payout_id: payoutId,
-      participants: contribs.length,
-      total_contribution: denominator,
-      residual_coin: toSatPrecision(residualCoin),
-      period_start: periodStart.toISOString(),
-      period_end: periodEnd.toISOString(),
-    };
+    return result;
   } catch (err) {
     await client.query('ROLLBACK');
     console.error('Reward distribution error:', err);
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Settlement recording (accrual mode): the pool paid the wallet — record the
+ * basis row so earnedTotal stays continuous, but DO NOT credit users (the
+ * accrual distributor already credited that production as it accrued).
+ * Without this row E would drop when unpaid resets and users would never be
+ * credited the post-payout accrual.
+ */
+async function recordPoolPayment(targetPool, totalCryptoReward1, totalNetworkHashrate) {
+  await pool.query(
+    `INSERT INTO real_pool_payouts
+      (target_pool, total_crypto_reward_1, total_network_hashrate, period_start, period_end, source)
+     VALUES ($1, $2, $3, CURRENT_TIMESTAMP - INTERVAL '1 minute', CURRENT_TIMESTAMP, 'POOL_PAYMENT')`,
+    [targetPool, totalCryptoReward1, totalNetworkHashrate]
+  );
+}
+
+/**
+ * Accrual distribution (016, 2026-08-20): credit the room's NEW real
+ * production since the last run — delta = E_now - E_last. This is the
+ * "daily in-game payouts" that removes the 27-day pool-settlement wait.
+ * The delta is hard-capped by what the room ACTUALLY accrued at the pool
+ * (source truth), so the platform float never exceeds the unsettled unpaid.
+ */
+async function distributeAccrued(targetPool) {
+  let realHashNow = null;
+  try {
+    let activeRentals = [];
+    if (targetPool === 'LTC_DOGE') {
+      const r = await pool.query(
+        "SELECT mrr_rental_id FROM rig_rentals WHERE target_pool = 'LTC_DOGE' AND status = 'ACTIVE'"
+      );
+      activeRentals = r.rows;
+    }
+    realHashNow = await fetchLiveRealHash(targetPool, activeRentals);
+  } catch (err) {
+    console.warn(`accrual: live real hash fetch failed for ${targetPool}: ${err.message}`);
+  }
+  let coinUsdPrice = 0;
+  try {
+    coinUsdPrice = await fetchCoinUsdPrice(targetPool);
+  } catch (err) {
+    console.warn(`accrual: price feed down for ${targetPool} — residual booked at 0 USDC: ${err.message}`);
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const stateRow = await client.query(
+      'SELECT earned_total, last_distributed_at FROM room_accrual WHERE pool = $1 FOR UPDATE',
+      [targetPool]
+    );
+    if (stateRow.rowCount === 0) {
+      // No seed yet (fresh install) — seed with the current E and move on;
+      // the NEXT run starts distributing.
+      const e0 = await earnedTotalFor(client, targetPool);
+      await client.query(
+        `INSERT INTO room_accrual (pool, earned_total, last_distributed_at)
+         VALUES ($1, $2, CURRENT_TIMESTAMP)
+         ON CONFLICT (pool) DO UPDATE SET earned_total = EXCLUDED.earned_total`,
+        [targetPool, e0]
+      );
+      await client.query('COMMIT');
+      return { pool: targetPool, status: 'seeded', earned_total: e0 };
+    }
+
+    const earnedLast = Number(stateRow.rows[0].earned_total);
+    const lastDistributedAt = new Date(stateRow.rows[0].last_distributed_at);
+    const earnedNow = await earnedTotalFor(client, targetPool);
+    const delta = earnedNow - earnedLast;
+
+    if (delta <= 1e-9) {
+      // Nothing new accrued (or the unpaid measurement is stale/zero) — keep
+      // the state untouched and skip. This also covers LTC/DOGE whose unpaid
+      // is not visible (E only moves when on-chain payments land).
+      await client.query('COMMIT');
+      return { pool: targetPool, status: 'no-change', earned_total: earnedNow, delta: 0 };
+    }
+
+    const periodStart = lastDistributedAt;
+    const periodEnd = new Date();
+
+    const payoutResult = await client.query(
+      `INSERT INTO real_pool_payouts
+        (target_pool, total_crypto_reward_1, total_network_hashrate, period_start, period_end, source)
+       VALUES ($1, $2, $3, $4, $5, 'ACCRUAL')
+       RETURNING payout_id`,
+      [targetPool, delta, null, periodStart, periodEnd]
+    );
+    const payoutId = payoutResult.rows[0].payout_id;
+
+    if (realHashNow != null) {
+      try {
+        await logRealHashChange(client, targetPool, realHashNow);
+      } catch (logErr) {
+        console.warn(`accrual: could not log real hash for ${targetPool}: ${logErr.message}`);
+      }
+    }
+
+    const result = await runSplit(client, targetPool, delta, periodStart, periodEnd, payoutId, coinUsdPrice);
+
+    await client.query(
+      `UPDATE room_accrual
+          SET earned_total = $1, last_distributed_at = $2, updated_at = CURRENT_TIMESTAMP
+        WHERE pool = $3`,
+      [earnedNow, periodEnd, targetPool]
+    );
+
+    await client.query('COMMIT');
+    console.log(`💰 Accrual ${targetPool}: +${delta} coin distributed (${result.participants} participants, residual ${result.residual_coin})`);
+    return { pool: targetPool, status: 'distributed', delta, ...result };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Accrual distribution error:', err);
     throw err;
   } finally {
     client.release();
@@ -358,4 +514,4 @@ async function handleRewardWebhook(req, res) {
   }
 }
 
-module.exports = { handleRewardWebhook, distributePayout, distributeMergedReward, PROTOCOL_FEE_PCT };
+module.exports = { handleRewardWebhook, distributePayout, distributeMergedReward, recordPoolPayment, distributeAccrued, earnedTotalFor, PROTOCOL_FEE_PCT };
