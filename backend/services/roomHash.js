@@ -49,15 +49,23 @@ async function fetchPoolAccount(pool) {
   }
 }
 
-/** MRR live average for an active rental, converted to the pool's GH/s. */
+/** MRR live average for an active rental, converted to the pool's GH/s.
+ *  Prefers the rig's LIVE reading (last_5min > last_15min > last_30min) over
+ *  the lifetime average — a freshly-started rig has average=0 while its 5min
+ *  reading is real (matches MRR's own "Current Hashrate" page). */
 async function rentalRealGhs(mrrRentalId) {
   try {
     const s = await getOrderStatus(String(mrrRentalId));
+    const live =
+      s?.data?.rig?.hashrate?.last_5min ??
+      s?.data?.rig?.hashrate?.last_15min ??
+      s?.data?.rig?.hashrate?.last_30min;
     const avg = s?.data?.hashrate?.average;
-    if (!avg) return 0;
-    const mult = { kh: 1e-3, mh: 1, gh: 1, th: 1e3 }[String(avg.type || '').toLowerCase()];
+    const pick = live && Number(live.hash) > 0 ? live : avg;
+    if (!pick) return 0;
+    const mult = { kh: 1e-3, mh: 1, gh: 1, th: 1e3 }[String(pick.type || '').toLowerCase()];
     if (mult === undefined) return 0;
-    return Number(avg.hash || 0) * mult;
+    return Number(pick.hash || 0) * mult;
   } catch {
     return 0;
   }
