@@ -82,7 +82,7 @@ export default function MiningRoomCard({
             <span className="stat-label">Pool payout</span>
             <span className="stat-value accent">
               {poolUnpaid != null
-                ? `${poolUnpaid >= 0.01 ? poolUnpaid.toFixed(4) : poolUnpaid.toExponential(2)} ${ps.unpaid_unit || ''}`
+                ? `${poolUnpaid === 0 ? '0.0000' : poolUnpaid < 0.01 ? poolUnpaid.toPrecision(3) : poolUnpaid.toFixed(4)} ${ps.unpaid_unit || ''}`
                 : '—'}
               {threshold != null && ` · pays at ${threshold} ${ps.unpaid_unit || ''}`}
               {etaText && ` · ${etaText}`}
