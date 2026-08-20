@@ -381,6 +381,11 @@ async function withdrawRewards(req, res) {
       const take = Math.min(Number(row.calculated_reward_1), remaining);
       remaining = Math.round((remaining - take) * 1e8) / 1e8;
       await client.query(
+        `INSERT INTO withdrawal_allocations (withdrawal_id, ledger_id, amount_coin)
+         VALUES ($1, $2, $3)`,
+        [withdrawalId, row.ledger_id, take]
+      );
+      await client.query(
         'UPDATE user_rewards_ledger SET withdrawal_id = $1 WHERE ledger_id = $2',
         [withdrawalId, row.ledger_id]
       );
@@ -444,10 +449,38 @@ async function markWithdrawalPaid(req, res) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Pending withdrawal not found' });
     }
-    await client.query(
-      `UPDATE user_rewards_ledger SET status = 'PAID' WHERE withdrawal_id = $1`,
+    const allocations = await client.query(
+      `SELECT a.ledger_id, a.amount_coin, l.calculated_reward_1
+         FROM withdrawal_allocations a
+         JOIN user_rewards_ledger l USING (ledger_id)
+        WHERE a.withdrawal_id = $1
+        FOR UPDATE OF l`,
       [id]
     );
+    if (allocations.rowCount === 0) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'Withdrawal allocations not found' });
+    }
+    for (const allocation of allocations.rows) {
+      const allocated = Number(allocation.amount_coin);
+      const fullReward = Number(allocation.calculated_reward_1);
+      if (allocated >= fullReward) {
+        await client.query(
+          `UPDATE user_rewards_ledger
+              SET status = 'PAID'
+            WHERE ledger_id = $1`,
+          [allocation.ledger_id]
+        );
+      } else {
+        await client.query(
+          `UPDATE user_rewards_ledger
+              SET calculated_reward_1 = calculated_reward_1 - $2,
+                  status = 'UNCLAIMED', withdrawal_id = NULL
+            WHERE ledger_id = $1`,
+          [allocation.ledger_id, allocated]
+        );
+      }
+    }
     await client.query('COMMIT');
     return res.json({ success: true, withdrawal_id: id, status: 'PAID', tx_hash: txHash });
   } catch (err) {
@@ -476,9 +509,15 @@ async function rejectWithdrawal(req, res) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Pending withdrawal not found' });
     }
-    // Release the held ledger rows back to UNCLAIMED.
+    // Release only rows explicitly allocated to this request. Allocation rows
+    // remain as the audit trail for the rejected request.
     await client.query(
-      `UPDATE user_rewards_ledger SET withdrawal_id = NULL WHERE withdrawal_id = $1`,
+      `UPDATE user_rewards_ledger
+          SET status = 'UNCLAIMED', withdrawal_id = NULL
+        WHERE withdrawal_id = $1
+          AND ledger_id IN (
+            SELECT ledger_id FROM withdrawal_allocations WHERE withdrawal_id = $1
+          )`,
       [id]
     );
     await client.query('COMMIT');

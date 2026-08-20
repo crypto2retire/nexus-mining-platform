@@ -100,13 +100,14 @@ describe('distributePayout — hybrid (fair slices over real hashrate)', () => {
     // 25 GH/s credit x 24h = 600 hash-hours; the room REALLY delivered
     // 195.5 GH/s x 24h = 4692 real hash-hours.
     // share = 600/4692 = 12.788% of 100 KAS = 12.7877 gross -> fee 0.6394 -> net 12.1483.
-    // Residual 87.8517 KAS is the operator baseline + unsold capacity.
+    // Residual 87.2123 KAS is unsold gross capacity only. The 0.6394 KAS fee
+    // is booked separately and must not be included in residual again.
     const result = await distributePayout('KASPA', 100, 1000);
 
     expect(result.payout_id).toBe('payout-1');
     expect(result.participants).toBe(1);
     expect(result.total_contribution).toBeCloseTo(4692, 3);
-    expect(result.residual_coin).toBeCloseTo(87.8517, 3);
+    expect(result.residual_coin).toBeCloseTo(87.2123, 3);
 
     const ledgerInsert = client.query.mock.calls.find(([sql]) => sql.includes('INSERT INTO user_rewards_ledger'));
     expect(ledgerInsert).toBeTruthy();
@@ -116,12 +117,22 @@ describe('distributePayout — hybrid (fair slices over real hashrate)', () => {
     // maintenance_fee_1 is a SQL literal 0 in the rental model (no deduction).
     expect(ledgerInsert[0]).toContain(', 0)');
 
-    // Residual booked as platform revenue (UNSOLD_CAPACITY), USDC at spot.
+    // Fee and residual are typed coin rows converted at the same snapshot.
+    const fee = client.query.mock.calls.find(
+      ([sql, p]) => sql.includes('INSERT INTO protocol_revenue_ledger') && p?.[2] === 'MINING_REWARD_FEE'
+    );
+    expect(fee[1]).toEqual(expect.arrayContaining(['KAS', 0.05]));
+    expect(Number(fee[1][1])).toBeCloseTo(0.6394 * 0.05, 4);
+
     const residual = client.query.mock.calls.find(
-      ([sql, p]) => sql.includes('INSERT INTO protocol_revenue_ledger') && p && p[1] === 'UNSOLD_CAPACITY'
+      ([sql, p]) => sql.includes('INSERT INTO protocol_revenue_ledger') && p?.[2] === 'UNSOLD_CAPACITY'
     );
     expect(residual).toBeTruthy();
-    expect(Number(residual[1][0])).toBeCloseTo(87.8517 * 0.05, 3);
+    expect(residual[1]).toEqual(expect.arrayContaining(['KAS', 0.05]));
+    expect(Number(residual[1][1])).toBeCloseTo(87.2123 * 0.05, 3);
+
+    const bookedCoin = Number(fee[1][3]) + Number(residual[1][3]);
+    expect(bookedCoin).toBeCloseTo(87.8517, 3);
 
     // No maintenance ledger rows in the rental model.
     const maintLedger = client.query.mock.calls.find(([sql]) => sql.includes('INSERT INTO maintenance_fee_ledger'));
@@ -160,12 +171,14 @@ describe('distributePayout — hybrid (fair slices over real hashrate)', () => {
     expect(Number(ledgerInsert[1][2])).toBeCloseTo(12.1483, 3); // net = gross - fee only
     expect(ledgerInsert[0]).toContain(', 0)');
 
-    // Residual row still exists, booked at 0 USDC (coins stay in the wallet).
+    // Residual row still exists, typed in KAS with no price snapshot.
     const residual = client.query.mock.calls.find(
-      ([sql, p]) => sql.includes('INSERT INTO protocol_revenue_ledger') && p && p[1] === 'UNSOLD_CAPACITY'
+      ([sql, p]) => sql.includes('INSERT INTO protocol_revenue_ledger') && p?.[2] === 'UNSOLD_CAPACITY'
     );
     expect(residual).toBeTruthy();
-    expect(Number(residual[1][0])).toBe(0);
+    expect(residual[1]).toEqual(expect.arrayContaining(['KAS']));
+    expect(Number(residual[1][1])).toBe(0);
+    expect(residual[1][5]).toBeNull();
   });
 });
 
@@ -253,12 +266,13 @@ describe('distributeMergedReward — merged DOGE distribution', () => {
     expect(fee).toBeTruthy();
     expect(Number(fee[1][1])).toBeCloseTo(0.6394, 3); // 6.394 DOGE × $0.10
 
-    // Residual (878.516 DOGE) booked at $0.10 = $87.85.
+    // Residual excludes the separately booked fee: 872.123 DOGE at $0.10.
     const residual = client.query.mock.calls.find(
-      ([sql, p]) => sql.includes('INSERT INTO protocol_revenue_ledger') && p && p[1] === 'UNSOLD_CAPACITY'
+      ([sql, p]) => sql.includes('INSERT INTO protocol_revenue_ledger') && p?.[2] === 'UNSOLD_CAPACITY'
     );
     expect(residual).toBeTruthy();
-    expect(Number(residual[1][0])).toBeCloseTo(87.8516, 3);
+    expect(residual[1]).toEqual(expect.arrayContaining(['DOGE', 0.1]));
+    expect(Number(residual[1][1])).toBeCloseTo(87.2123, 3);
   });
 });
 

@@ -50,8 +50,14 @@ describe('adminStatsController.getAdminStats', () => {
         ],
       }) // distributed (for treasury 5%)
       .mockResolvedValueOnce({
-        rows: [{ total_fees_usdc: '12.50', fee_count: '3' }],
-      }) // protocol fees
+        rows: [{ total_revenue_usdc: '12.50', revenue_entry_count: '3' }],
+      }) // protocol revenue
+      .mockResolvedValueOnce({
+        rows: [
+          { coin_symbol: 'KAS', total_coin: '42.50000000' },
+          { coin_symbol: 'ZEC', total_coin: '1.25000000' },
+        ],
+      }) // typed coin revenue
       .mockResolvedValueOnce({
         rows: [
           {
@@ -81,14 +87,15 @@ describe('adminStatsController.getAdminStats', () => {
     await getAdminStats({}, res);
 
     // Guard: confirm the mock chain consumed exactly as expected.
-    expect(pool.query).toHaveBeenCalledTimes(6);
+    expect(pool.query).toHaveBeenCalledTimes(7);
     expect(getBacking).toHaveBeenCalledTimes(1);
     expect(res.statusCode).toBe(200);
     expect(res.body.capacity_by_pool.KASPA.total_hashrate).toBe(125);
     expect(res.body.capacity_by_pool.ZCASH.rig_count).toBe(2);
     expect(res.body.payouts_by_pool.KASPA.total_crypto).toBe(100);
     expect(res.body.payouts_by_pool.KASPA.treasury_share_crypto).toBe(2); // 5% of distributed (40)
-    expect(res.body.treasury.protocol_fees_usdc).toBe(12.5);
+    expect(res.body.treasury.protocol_revenue_usdc).toBe(12.5);
+    expect(res.body.treasury.coin_amounts_by_symbol).toEqual({ KAS: 42.5, ZEC: 1.25 });
     expect(res.body.ledger_by_pool.KASPA.unclaimed_crypto).toBe(60);
     expect(res.body.users.count).toBe(4);
     expect(res.body.deposits.total_usdc).toBe(250);
@@ -113,7 +120,8 @@ describe('adminStatsController.getAdminStats', () => {
     expect(Object.keys(res.body.payouts_by_pool).sort()).toEqual(['KASPA', 'LTC_DOGE', 'XMR', 'ZCASH']);
     expect(res.body.payouts_by_pool.KASPA.total_crypto).toBe(0);
     expect(res.body.ledger_by_pool).toEqual({});
-    expect(res.body.treasury.protocol_fees_usdc).toBe(0);
+    expect(res.body.treasury.protocol_revenue_usdc).toBe(0);
+    expect(res.body.treasury.coin_amounts_by_symbol).toEqual({});
     expect(res.body.users.count).toBe(0);
     expect(res.body.deposits.total_usdc).toBe(0);
   });

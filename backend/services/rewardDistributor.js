@@ -35,6 +35,14 @@ const POOL_COINGECKO = {
   LTC_DOGE_DOGE: 'dogecoin',
 };
 
+const POOL_COIN_SYMBOL = {
+  ZCASH: 'ZEC',
+  KASPA: 'KAS',
+  LTC_DOGE: 'LTC',
+  XMR: 'XMR',
+  LTC_DOGE_DOGE: 'DOGE',
+};
+
 async function fetchCoinUsdPrice(targetPool) {
   const cgId = POOL_COINGECKO[targetPool];
   if (!cgId) throw new Error(`No price feed for ${targetPool}`);
@@ -50,19 +58,19 @@ async function fetchCoinUsdPrice(targetPool) {
 }
 
 /**
- * Book the platform's residual (unsold capacity + operator baseline) as
- * platform revenue. source_user_id stays NULL — the row is platform-level,
- * not attributable to a player. amount_usdc is 0 when no price is available
- * (the coins physically remain in the platform wallet; the USDC booking can
- * be backfilled later).
+ * Book coin-denominated platform revenue with the exact conversion snapshot.
+ * A missing price remains auditable as amount_usdc=0 + NULL snapshot while
+ * preserving the native coin amount for later reconciliation.
  */
-async function bookUnsoldResidual(client, amountCoin, coinUsdPrice, transactionType) {
+async function bookCoinRevenue(client, sourceUserId, amountCoin, coinSymbol, coinUsdPrice, transactionType) {
   if (!(amountCoin > 0)) return;
-  const usdc = coinUsdPrice > 0 ? parseFloat((amountCoin * coinUsdPrice).toFixed(4)) : 0;
+  const priceSnapshot = coinUsdPrice > 0 ? Number(coinUsdPrice) : null;
+  const usdc = priceSnapshot ? parseFloat((amountCoin * priceSnapshot).toFixed(4)) : 0;
   await client.query(
-    `INSERT INTO protocol_revenue_ledger (source_user_id, amount_usdc, transaction_type)
-     VALUES (NULL, $1, $2)`,
-    [usdc, transactionType]
+    `INSERT INTO protocol_revenue_ledger
+      (source_user_id, amount_usdc, transaction_type, amount_coin, coin_symbol, price_snapshot_usd)
+     VALUES ($1, $2, $3, $4, $5, $6)`,
+    [sourceUserId, usdc, transactionType, toSatPrecision(amountCoin), coinSymbol, priceSnapshot]
   );
 }
 
@@ -115,14 +123,14 @@ async function runSplit(client, targetPool, totalCoin, periodStart, periodEnd, p
     );
   }
 
-  let totalNet = 0;
+  let totalGross = 0;
   for (const c of contribs) {
     if (denominator <= 0 || c.contribution <= 0) continue;
     const sharePct = c.contribution / denominator;
     const gross = Number(totalCoin) * sharePct;
     const fee = gross * PROTOCOL_FEE_PCT;
     const net = gross - fee;
-    totalNet += net;
+    totalGross += gross;
 
     await client.query(
       `INSERT INTO user_rewards_ledger
@@ -131,18 +139,29 @@ async function runSplit(client, targetPool, totalCoin, periodStart, periodEnd, p
        VALUES ($1, $2, $3, $4, 'UNCLAIMED', $5, $6, $7, 0)`,
       [c.user_id, payoutId, net, fee, c.contribution, denominator, sharePct]
     );
-    await client.query(
-      'INSERT INTO protocol_revenue_ledger (source_user_id, amount_usdc, transaction_type) VALUES ($1, $2, $3)',
-      [c.user_id, fee, 'MINING_REWARD_FEE']
+    await bookCoinRevenue(
+      client,
+      c.user_id,
+      fee,
+      POOL_COIN_SYMBOL[targetPool],
+      priceUsd,
+      'MINING_REWARD_FEE'
     );
   }
 
   // Residual = what the room produced that no holder's credit covers —
   // the operator baseline + unsold capacity. It stays in the platform
   // wallet; booked here as platform revenue.
-  const residualCoin = Number(totalCoin) - totalNet;
+  const residualCoin = Number(totalCoin) - totalGross;
   if (residualCoin > 0) {
-    await bookUnsoldResidual(client, residualCoin, priceUsd, 'UNSOLD_CAPACITY');
+    await bookCoinRevenue(
+      client,
+      null,
+      residualCoin,
+      POOL_COIN_SYMBOL[targetPool],
+      priceUsd,
+      'UNSOLD_CAPACITY'
+    );
   }
 
   await client.query(
@@ -431,14 +450,14 @@ async function distributeMergedReward(targetPool, totalCryptoReward2, totalNetwo
       );
     }
 
-    let totalNet = 0;
+    let totalGross = 0;
     for (const c of contribs) {
       if (denominator <= 0 || c.contribution <= 0) continue;
       const sharePct = c.contribution / denominator;
       const gross = Number(totalCryptoReward2) * sharePct;
       const fee = gross * PROTOCOL_FEE_PCT;
       const net = gross - fee;
-      totalNet += net;
+      totalGross += gross;
 
       await client.query(
         `INSERT INTO user_rewards_ledger
@@ -448,17 +467,26 @@ async function distributeMergedReward(targetPool, totalCryptoReward2, totalNetwo
         [c.user_id, payoutId, net, fee, c.contribution, denominator, sharePct]
       );
 
-      if (dogePrice && fee > 0) {
-        await client.query(
-          'INSERT INTO protocol_revenue_ledger (source_user_id, amount_usdc, transaction_type) VALUES ($1, $2, $3)',
-          [c.user_id, parseFloat((fee * dogePrice).toFixed(4)), 'MINING_REWARD_FEE']
-        );
-      }
+      await bookCoinRevenue(
+        client,
+        c.user_id,
+        fee,
+        POOL_COIN_SYMBOL.LTC_DOGE_DOGE,
+        dogePrice,
+        'MINING_REWARD_FEE'
+      );
     }
 
-    const residualCoin = Number(totalCryptoReward2) - totalNet;
+    const residualCoin = Number(totalCryptoReward2) - totalGross;
     if (residualCoin > 0) {
-      await bookUnsoldResidual(client, residualCoin, dogePrice || 0, 'UNSOLD_CAPACITY');
+      await bookCoinRevenue(
+        client,
+        null,
+        residualCoin,
+        POOL_COIN_SYMBOL.LTC_DOGE_DOGE,
+        dogePrice,
+        'UNSOLD_CAPACITY'
+      );
     }
 
     await client.query(

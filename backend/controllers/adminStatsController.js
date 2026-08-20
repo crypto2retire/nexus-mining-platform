@@ -12,7 +12,7 @@ const { getBacking } = require('../services/backingMonitor');
 
 async function getAdminStats(_req, res) {
   try {
-    const [capacity, distributed, fees, ledger, users, deposits, backing] = await Promise.all([
+    const [capacity, distributed, revenue, revenueCoins, ledger, users, deposits, backing] = await Promise.all([
       // 1. Total virtual mining capacity per coin (ACTIVE credits only —
       // expired 0-GH/s rigs must not count; Kevin 2026-08-20).
       pool.query(
@@ -34,11 +34,20 @@ async function getAdminStats(_req, res) {
           GROUP BY target_pool
           ORDER BY target_pool`
       ),
-      // 3. Treasury profit from protocol fees (USDC) — the 5% fee on upgrades.
+      // 3. Treasury revenue converted to USDC at each row's recorded price.
       pool.query(
-        `SELECT COALESCE(SUM(amount_usdc), 0) AS total_fees_usdc,
-                COUNT(*) AS fee_count
+        `SELECT COALESCE(SUM(amount_usdc), 0) AS total_revenue_usdc,
+                COUNT(*) AS revenue_entry_count
            FROM protocol_revenue_ledger`
+      ),
+      // Native coin totals stay separately auditable and are never summed
+      // across symbols as though they shared a unit.
+      pool.query(
+        `SELECT coin_symbol, COALESCE(SUM(amount_coin), 0) AS total_coin
+           FROM protocol_revenue_ledger
+          WHERE coin_symbol IS NOT NULL AND amount_coin IS NOT NULL
+          GROUP BY coin_symbol
+          ORDER BY coin_symbol`
       ),
       // 4. User rewards ledger totals per coin (by status) — pool comes from
       //    the payout row the ledger entry belongs to.
@@ -107,15 +116,20 @@ async function getAdminStats(_req, res) {
       };
     }
 
+    const coinAmountsBySymbol = {};
+    for (const r of revenueCoins.rows) {
+      coinAmountsBySymbol[r.coin_symbol] = Number(r.total_coin);
+    }
+
     return res.json({
       generated_at: new Date().toISOString(),
       capacity_by_pool: capacityByPool,
       payouts_by_pool: payoutsByPool,
       ledger_by_pool: ledgerByPool,
       treasury: {
-        protocol_fees_usdc: Number(fees.rows[0]?.total_fees_usdc || 0),
-        fee_count: Number(fees.rows[0]?.fee_count || 0),
-        // 5% of every pool payout also flows to the treasury (see payouts_by_pool).
+        protocol_revenue_usdc: Number(revenue.rows[0]?.total_revenue_usdc || 0),
+        revenue_entry_count: Number(revenue.rows[0]?.revenue_entry_count || 0),
+        coin_amounts_by_symbol: coinAmountsBySymbol,
       },
       users: {
         count: Number(users.rows[0]?.user_count || 0),

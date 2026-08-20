@@ -60,7 +60,13 @@ jest.mock('axios', () => ({
 
 const { pool } = require('../config/db');
 const axios = require('axios');
-const { claimRewards, withdrawRewards, getRewards } = require('../controllers/rewardsController');
+const {
+  claimRewards,
+  withdrawRewards,
+  markWithdrawalPaid,
+  rejectWithdrawal,
+  getRewards,
+} = require('../controllers/rewardsController');
 
 const REAL_ENV = { ...process.env };
 const WALLET = '0x1111111111111111111111111111111111111111';
@@ -121,7 +127,16 @@ afterEach(() => {
 });
 
 function makeRes() {
-  return { status: jest.fn().mockReturnThis(), json: jest.fn().mockReturnThis() };
+  const res = { statusCode: 200, body: null };
+  res.status = jest.fn((code) => {
+    res.statusCode = code;
+    return res;
+  });
+  res.json = jest.fn((body) => {
+    res.body = body;
+    return res;
+  });
+  return res;
 }
 
 describe('claimRewards', () => {
@@ -171,20 +186,88 @@ describe('claimRewards', () => {
 });
 
 describe('withdrawRewards', () => {
-  function withdrawClient({ available = 5 } = {}) {
+  function withdrawClient({ rewards = [5] } = {}) {
+    const state = {
+      rows: rewards.map((amount, index) => ({
+        ledger_id: `ledger-${index + 1}`,
+        calculated_reward_1: Number(amount),
+        status: 'UNCLAIMED',
+        withdrawal_id: null,
+      })),
+      allocations: [],
+      requests: [],
+    };
     const client = {
-      query: jest.fn(async (sql) => {
+      query: jest.fn(async (sql, params = []) => {
         if (sql.includes('SELECT user_id FROM users')) {
           return { rowCount: 1, rows: [{ user_id: 'user-1' }] };
         }
         if (sql.includes("l.status = 'UNCLAIMED' AND l.withdrawal_id IS NULL")) {
-          return { rowCount: 1, rows: [{ ledger_id: 'ledger-1', calculated_reward_1: String(available) }] };
+          const rows = state.rows
+            .filter((row) => row.status === 'UNCLAIMED' && row.withdrawal_id === null)
+            .map((row) => ({ ...row, calculated_reward_1: String(row.calculated_reward_1) }));
+          return { rowCount: rows.length, rows };
         }
         if (sql.includes('INSERT INTO withdrawal_requests')) {
-          return { rowCount: 1, rows: [{ withdrawal_id: 'withdraw-1' }] };
+          const withdrawal_id = `withdraw-${state.requests.length + 1}`;
+          state.requests.push({ withdrawal_id, status: 'PENDING' });
+          return { rowCount: 1, rows: [{ withdrawal_id }] };
+        }
+        if (sql.includes('INSERT INTO withdrawal_allocations')) {
+          state.allocations.push({
+            withdrawal_id: params[0],
+            ledger_id: params[1],
+            amount_coin: Number(params[2]),
+          });
+          return { rowCount: 1, rows: [] };
         }
         if (sql.includes('UPDATE user_rewards_ledger SET withdrawal_id')) {
+          const row = state.rows.find((candidate) => candidate.ledger_id === params[1]);
+          row.withdrawal_id = params[0];
           return { rowCount: 1, rows: [] };
+        }
+        if (sql.includes("SET status = 'PAID', tx_hash")) {
+          const request = state.requests.find((candidate) => candidate.withdrawal_id === params[0] && candidate.status === 'PENDING');
+          if (!request) return { rowCount: 0, rows: [] };
+          request.status = 'PAID';
+          return { rowCount: 1, rows: [{ withdrawal_id: request.withdrawal_id }] };
+        }
+        if (sql.includes('FROM withdrawal_allocations') && sql.includes('FOR UPDATE')) {
+          const rows = state.allocations
+            .filter((allocation) => allocation.withdrawal_id === params[0])
+            .map((allocation) => ({
+              ...allocation,
+              calculated_reward_1: String(state.rows.find((row) => row.ledger_id === allocation.ledger_id).calculated_reward_1),
+            }));
+          return { rowCount: rows.length, rows };
+        }
+        if (sql.includes("SET status = 'PAID'") && sql.includes('ledger_id = $1')) {
+          const row = state.rows.find((candidate) => candidate.ledger_id === params[0]);
+          row.status = 'PAID';
+          return { rowCount: 1, rows: [] };
+        }
+        if (sql.includes('calculated_reward_1 = calculated_reward_1 - $2')) {
+          const row = state.rows.find((candidate) => candidate.ledger_id === params[0]);
+          row.calculated_reward_1 -= Number(params[1]);
+          row.withdrawal_id = null;
+          row.status = 'UNCLAIMED';
+          return { rowCount: 1, rows: [] };
+        }
+        if (sql.includes('withdrawal_id = NULL')) {
+          state.rows.filter((row) => row.withdrawal_id === params[0]).forEach((row) => { row.withdrawal_id = null; });
+          return { rowCount: 1, rows: [] };
+        }
+        // Reproduces the old broken blanket payment behavior until the
+        // allocation-aware implementation replaces it.
+        if (sql.includes("SET status = 'PAID'") && sql.includes('withdrawal_id = $1')) {
+          state.rows.filter((row) => row.withdrawal_id === params[0]).forEach((row) => { row.status = 'PAID'; });
+          return { rowCount: 1, rows: [] };
+        }
+        if (sql.includes("SET status = 'REJECTED'")) {
+          const request = state.requests.find((candidate) => candidate.withdrawal_id === params[0] && candidate.status === 'PENDING');
+          if (!request) return { rowCount: 0, rows: [] };
+          request.status = 'REJECTED';
+          return { rowCount: 1, rows: [{ withdrawal_id: request.withdrawal_id }] };
         }
         if (sql === 'BEGIN' || sql === 'COMMIT' || sql === 'ROLLBACK') {
           return { rowCount: 1, rows: [] };
@@ -194,26 +277,85 @@ describe('withdrawRewards', () => {
       release: jest.fn(),
     };
     pool.connect.mockResolvedValue(client);
-    return client;
+    return { client, state };
   }
 
-  test('holds unclaimed rewards and creates a PENDING coin withdrawal request', async () => {
-    const client = withdrawClient({ available: 5 });
-    const res = makeRes();
+  async function requestWithdrawal(amount, res = makeRes()) {
     await withdrawRewards({
       auth: { wallet: WALLET },
-      body: { target_pool: 'ZCASH', amount_coin: 2, to_address: 't1V5oarvihbomZswPw381AowjPpGj1t2B3K' },
+      body: { target_pool: 'ZCASH', amount_coin: amount, to_address: 't1V5oarvihbomZswPw381AowjPpGj1t2B3K' },
     }, res);
+    return res;
+  }
+
+  test('full-row withdrawal records the exact allocation and marks the row paid', async () => {
+    const { state } = withdrawClient({ rewards: [5] });
+    const res = makeRes();
+    await requestWithdrawal(5, res);
     expect(res.json).toHaveBeenCalledWith(
-      expect.objectContaining({ success: true, withdrawal_id: 'withdraw-1', target_pool: 'ZCASH', amount_coin: 2, status: 'PENDING' })
+      expect.objectContaining({ success: true, withdrawal_id: 'withdraw-1', target_pool: 'ZCASH', amount_coin: 5, status: 'PENDING' })
     );
-    // ledger rows held (withdrawal_id set)
-    const holds = client.query.mock.calls.filter(([sql]) => sql.includes('SET withdrawal_id'));
-    expect(holds.length).toBe(1);
+    expect(state.allocations).toEqual([
+      { withdrawal_id: 'withdraw-1', ledger_id: 'ledger-1', amount_coin: 5 },
+    ]);
+
+    const paid = makeRes();
+    await markWithdrawalPaid({ params: { id: 'withdraw-1' }, body: { tx_hash: 'coin-tx-1' } }, paid);
+    expect(paid.statusCode).toBe(200);
+    expect(state.rows[0]).toEqual(expect.objectContaining({ status: 'PAID', calculated_reward_1: 5 }));
+  });
+
+  test('partial withdrawal leaves the unwithdrawn remainder claimable after payment', async () => {
+    const { state } = withdrawClient({ rewards: [2, 5] });
+    await requestWithdrawal(3);
+    expect(state.allocations).toEqual([
+      { withdrawal_id: 'withdraw-1', ledger_id: 'ledger-1', amount_coin: 2 },
+      { withdrawal_id: 'withdraw-1', ledger_id: 'ledger-2', amount_coin: 1 },
+    ]);
+
+    const paid = makeRes();
+    await markWithdrawalPaid({ params: { id: 'withdraw-1' }, body: { tx_hash: 'coin-tx-2' } }, paid);
+    expect(paid.statusCode).toBe(200);
+    expect(state.rows[0]).toEqual(expect.objectContaining({ status: 'PAID', calculated_reward_1: 2 }));
+    expect(state.rows[1]).toEqual(expect.objectContaining({
+      status: 'UNCLAIMED',
+      calculated_reward_1: 4,
+      withdrawal_id: null,
+    }));
+  });
+
+  test('rejecting a partial withdrawal releases the original full reward', async () => {
+    const { state } = withdrawClient({ rewards: [2, 5] });
+    await requestWithdrawal(3);
+
+    const rejected = makeRes();
+    await rejectWithdrawal({ params: { id: 'withdraw-1' }, body: {} }, rejected);
+    expect(rejected.statusCode).toBe(200);
+    expect(state.rows[0]).toEqual(expect.objectContaining({
+      status: 'UNCLAIMED',
+      calculated_reward_1: 2,
+      withdrawal_id: null,
+    }));
+    expect(state.rows[1]).toEqual(expect.objectContaining({
+      status: 'UNCLAIMED',
+      calculated_reward_1: 5,
+      withdrawal_id: null,
+    }));
+    expect(state.allocations).toHaveLength(2);
+  });
+
+  test('a held ledger row cannot fund a second concurrent withdrawal', async () => {
+    const { state } = withdrawClient({ rewards: [5] });
+    await requestWithdrawal(2);
+    const second = await requestWithdrawal(1);
+
+    expect(second.statusCode).toBe(400);
+    expect(state.requests).toHaveLength(1);
+    expect(state.allocations).toHaveLength(1);
   });
 
   test('rejects withdrawals exceeding unclaimed rewards', async () => {
-    withdrawClient({ available: 1 });
+    withdrawClient({ rewards: [1] });
     const res = makeRes();
     await withdrawRewards({
       auth: { wallet: WALLET },
@@ -223,7 +365,7 @@ describe('withdrawRewards', () => {
   });
 
   test('rejects invalid destination addresses for the coin', async () => {
-    withdrawClient({ available: 5 });
+    withdrawClient({ rewards: [5] });
     const res = makeRes();
     // ZEC addresses must start t1... — a 0x EVM address is not valid ZEC.
     await withdrawRewards({

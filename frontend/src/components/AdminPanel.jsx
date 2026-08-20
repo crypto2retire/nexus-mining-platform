@@ -217,8 +217,8 @@ export default function AdminPanel({ refreshKey = 0 }) {
                 </tbody>
               </table>
               <p className="admin-miner">
-                <strong>Treasury protocol fees:</strong> ${Number(stats.treasury?.protocol_fees_usdc ?? 0).toFixed(2)} USDC
-                ({stats.treasury?.fee_count ?? 0} upgrades) — the 5% fee on every purchase.
+                <strong>Treasury revenue:</strong> ${Number(stats.treasury?.protocol_revenue_usdc ?? 0).toFixed(2)} USDC
+                ({stats.treasury?.revenue_entry_count ?? 0} ledger entries, converted at recorded price snapshots).
               </p>
             </>
           )}
