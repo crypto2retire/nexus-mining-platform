@@ -415,3 +415,127 @@ describe('upgradeRig — currency conversion + order loop', () => {
     expect(rentalInsert.sql).toContain("'ACTIVE'"); // status literal
   });
 });
+
+// ---- buySession: HYBRID short sessions (1h-24h slices of spare capacity) ---
+
+jest.mock('../services/roomHash', () => ({ fetchLiveRealHash: jest.fn() }));
+const { fetchLiveRealHash } = require('../services/roomHash');
+const { buySession } = require('../controllers/upgradeController');
+const mrrRenter = require('../services/mrrRenter');
+
+function sessionClient({ balance = 1000, activeCredits = 25, myHashrate = 25 } = {}) {
+  const calls = [];
+  const client = {
+    query: jest.fn(async (sql, params = []) => {
+      calls.push({ sql, params });
+      if (sql === 'BEGIN' || sql === 'COMMIT' || sql === 'ROLLBACK') return { rowCount: 1, rows: [] };
+      if (sql.includes('SELECT user_id FROM users')) return { rowCount: 1, rows: [{ user_id: 'user-1' }] };
+      if (sql.includes('SELECT COUNT(*) AS c FROM virtual_rigs')) return { rowCount: 1, rows: [{ c: '0' }] };
+      if (sql.includes('SELECT wallet_id, usdc_balance')) {
+        return { rowCount: 1, rows: [{ wallet_id: 'wallet-1', usdc_balance: balance }] };
+      }
+      if (sql.includes('FROM virtual_rigs WHERE target_pool = $1 FOR UPDATE')) {
+        return {
+          rowCount: 1,
+          rows: [
+            {
+              rig_id: 'rig-1',
+              user_id: 'user-1',
+              virtual_hashrate: myHashrate,
+              rental_expires_at: new Date(Date.now() + 24 * 3600 * 1000),
+            },
+          ],
+        };
+      }
+      if (sql.includes('INSERT INTO hashrate_orders')) return { rowCount: 1, rows: [{ order_id: 'order-s1' }] };
+      if (sql.includes('INSERT INTO protocol_revenue_ledger')) return { rowCount: 1, rows: [] };
+      if (sql.includes('UPDATE user_wallets')) return { rowCount: 1, rows: [] };
+      if (sql.includes('UPDATE virtual_rigs')) return { rowCount: 1, rows: [] };
+      if (sql.includes('INSERT INTO rig_hashrate_history')) return { rowCount: 1, rows: [] };
+      throw new Error(`unexpected sql: ${sql}`);
+    }),
+    release: jest.fn(),
+  };
+  pool.connect.mockResolvedValue(client);
+  fetchLiveRealHash.mockResolvedValue(195.5);
+  return { client, calls };
+}
+
+function makeSessionRes() {
+  const res = { statusCode: null, body: null };
+  res.status = jest.fn((code) => { res.statusCode = code; return res; });
+  res.json = jest.fn((obj) => { res.body = obj; return res; });
+  return res;
+}
+
+describe('buySession — hybrid short sessions', () => {
+  test('full flow: charges the marked-up price, books SESSION_SALE, NO marketplace order, stacks the rig', async () => {
+    const { client, calls } = sessionClient();
+    const res = makeSessionRes();
+    await buySession(
+      { body: { wallet: WALLET, target_pool: 'KASPA', request_id: 'sess-1', hours: 1, ghs: 25 } },
+      res
+    );
+
+    expect(res.statusCode).toBeFalsy(); // success path: no status set
+    expect(res.body.success).toBe(true);
+    expect(res.body.session).toBe(true);
+    // 25 GH/s x 1h x base(5/25/72=0.0027778) x markup 5 = 0.3472 (no discount)
+    expect(Number(res.body.price)).toBeCloseTo(0.3472, 4);
+    expect(res.body.ghs).toBe(25);
+    expect(res.body.hours).toBe(1);
+    expect(res.body.rental_expires_at).toBeTruthy();
+
+    // SESSION audit row: marketplace literal, algorithm mapped, hours recorded.
+    const orderInsert = calls.find((c) => c.sql.includes('INSERT INTO hashrate_orders'));
+    expect(orderInsert).toBeTruthy();
+    expect(orderInsert.sql).toContain("'SESSION'");
+    expect(orderInsert.params[4]).toBe('KHEAVYHASH'); // POOL_ALGORITHM_MAP — was ReferenceError before the fix
+    expect(orderInsert.params[6]).toBe(1); // rig_hours
+
+    // FULL price booked as platform revenue (the rig was already paid for).
+    const revenue = calls.find((c) => c.sql.includes('INSERT INTO protocol_revenue_ledger'));
+    expect(revenue.params[2]).toBe('SESSION_SALE'); // type is a $N param, not a literal
+    expect(Number(revenue.params[1])).toBeCloseTo(0.3472, 4);
+
+    // NO marketplace order ever placed for a session.
+    expect(mrrRenter.placeHashpowerOrder).not.toHaveBeenCalled();
+
+    // Rig stacked: 25 + 25 = 50 GH/s.
+    const rigUpdate = calls.find((c) => c.sql.includes('UPDATE virtual_rigs'));
+    expect(Number(rigUpdate.params[0])).toBeCloseTo(50, 4);
+  });
+
+  test('oversell guard: rejects when the slot exceeds spare capacity', async () => {
+    // Credits 180 GH/s on a 195.5 GH/s room -> spare 15.5 < 25 slot.
+    const { client } = sessionClient({ activeCredits: 180, myHashrate: 180 });
+    const res = makeSessionRes();
+    await buySession(
+      { body: { wallet: WALLET, target_pool: 'KASPA', request_id: 'sess-2', hours: 1, ghs: 25 } },
+      res
+    );
+    expect(res.statusCode).toBe(409);
+    expect(res.body.error).toMatch(/spare capacity/);
+  });
+
+  test('validation: 72h is NOT a session — must use the rent flow', async () => {
+    const res = makeSessionRes();
+    await buySession(
+      { body: { wallet: WALLET, target_pool: 'KASPA', request_id: 'sess-3', hours: 72, ghs: 25 } },
+      res
+    );
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error).toMatch(/72h rentals go through the rent flow/);
+  });
+
+  test('capacity must be MEASURABLE — a failed live fetch blocks the sale (503)', async () => {
+    fetchLiveRealHash.mockResolvedValue(null);
+    const res = makeSessionRes();
+    await buySession(
+      { body: { wallet: WALLET, target_pool: 'KASPA', request_id: 'sess-4', hours: 1, ghs: 25 } },
+      res
+    );
+    expect(res.statusCode).toBe(503);
+    expect(res.body.error).toMatch(/cannot be measured/);
+  });
+});

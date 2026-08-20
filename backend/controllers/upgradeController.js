@@ -622,6 +622,10 @@ async function buySession(req, res) {
   const hours = Number(req.body.hours);
   const ghs = Number(req.body.ghs);
 
+  // POOL_ALGORITHM_MAP lives on the provider module (same map upgradeRig
+  // uses) — resolve it from the configured renter so the audit row writes.
+  const { POOL_ALGORITHM_MAP } = getRenter();
+
   if (!walletAddress || !/^0x[a-f0-9]{40}$/i.test(walletAddress)) {
     return res.status(400).json({ error: 'Valid wallet address is required' });
   }
@@ -677,6 +681,8 @@ async function buySession(req, res) {
   let newHashrate = null;
   let hadActiveRig = false;
   let prevExpiry = null;
+  // Hoisted so the response can report remaining spare AFTER the tx commits.
+  let credits = 0;
   try {
     await client.query('BEGIN');
 
@@ -719,7 +725,7 @@ async function buySession(req, res) {
       [targetPool]
     );
     const now = new Date();
-    let credits = 0;
+    credits = 0;
     let myRow = null;
     for (const r of rigRows.rows) {
       const exp = r.rental_expires_at ? new Date(r.rental_expires_at).getTime() : 0;
