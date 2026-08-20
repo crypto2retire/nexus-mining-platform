@@ -94,7 +94,10 @@ describe('buildBacking', () => {
     // 120591854 atoms / 1e8 = 1.2059 KAS
     expect(backing.KASPA.pool_unpaid).toBeCloseTo(1.2059, 4);
     expect(backing.KASPA.pool_unpaid_unit).toBe('KAS');
-    expect(backing.KASPA.mined_total).toBe(1.2345);
+    // LIVE production (Kevin 2026-08-20): current pool unpaid + settled
+    // POOL_PAYMENT rows — computed at read time, never the 6h-old snapshot.
+    // Mock supplies a settled POOL_PAYMENT row (1.2345), so mined = 1.2059 + 1.2345.
+    expect(backing.KASPA.mined_total).toBeCloseTo(1.2059 + 1.2345, 4);
 
     // XMR: hashrate_24h in H/s, unpaid scaled from herominers atoms.
     expect(backing.XMR.virtual_ghs).toBe(0);
@@ -157,6 +160,13 @@ describe('getBacking cache', () => {
     await getBacking();
     expect(axios.get.mock.calls.length).toBeGreaterThan(callsAfterFirst);
     jest.restoreAllMocks();
+  });
+
+  it('exposes generated_at / cache_ttl_ms so consumers can show data freshness', async () => {
+    const backing = await getBacking();
+    expect(backing.generated_at).toBeDefined();
+    expect(backing.cache_ttl_ms).toBe(TTL_MS);
+    expect(backing.KASPA.fetched_at).toBeDefined();
   });
 
   it('force=true rebuilds immediately', async () => {

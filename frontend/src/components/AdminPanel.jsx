@@ -236,6 +236,9 @@ export default function AdminPanel({ wallet, refreshKey = 0 }) {
               <p className="admin-miner">
                 <strong>Real rate</strong> comes from the pool's own wallet API (ZEC/KAS), the rented rig's live
                 average (LTC), or the F2Pool worker stats (DOGE). Refreshes every 60s.
+                {backing.generated_at && (
+                  <span className="admin-freshness"> · data as of {new Date(backing.generated_at).toLocaleTimeString()}</span>
+                )}
               </p>
             </>
           )}

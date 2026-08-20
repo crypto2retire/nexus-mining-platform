@@ -11,6 +11,13 @@ jest.mock('../config/db', () => ({
   pool: { query: jest.fn() },
 }));
 
+// The controller now pulls LIVE production from getBacking() (same source as
+// the Real Backing panel) instead of a 6h-old room_accrual snapshot.
+jest.mock('../services/backingMonitor', () => ({
+  getBacking: jest.fn(),
+}));
+const { getBacking } = require('../services/backingMonitor');
+
 function makeRes() {
   const res = { statusCode: 200, body: null };
   res.status = jest.fn((code) => {
@@ -39,11 +46,6 @@ describe('adminStatsController.getAdminStats', () => {
       }) // capacity
       .mockResolvedValueOnce({
         rows: [
-          { target_pool: 'KASPA', total_crypto: '100.00000000' },
-        ],
-      }) // accrual (REAL production)
-      .mockResolvedValueOnce({
-        rows: [
           { target_pool: 'KASPA', distributed_crypto: '40.00000000' },
         ],
       }) // distributed (for treasury 5%)
@@ -65,12 +67,22 @@ describe('adminStatsController.getAdminStats', () => {
       .mockResolvedValueOnce({
         rows: [{ total_deposits_usdc: '250.0000', deposit_count: '5' }],
       }); // deposits
+    // LIVE production from the Real Backing source.
+    getBacking.mockResolvedValue({
+      KASPA: { mined_total: 100, fetched_at: '2026-08-20T06:00:00Z' },
+      ZCASH: { mined_total: 0 },
+      LTC_DOGE: { mined_total: 0 },
+      XMR: { mined_total: 0 },
+      generated_at: '2026-08-20T06:00:00Z',
+      cache_ttl_ms: 60000,
+    });
 
     const res = makeRes();
     await getAdminStats({}, res);
 
     // Guard: confirm the mock chain consumed exactly as expected.
-    expect(pool.query).toHaveBeenCalledTimes(7);
+    expect(pool.query).toHaveBeenCalledTimes(6);
+    expect(getBacking).toHaveBeenCalledTimes(1);
     expect(res.statusCode).toBe(200);
     expect(res.body.capacity_by_pool.KASPA.total_hashrate).toBe(125);
     expect(res.body.capacity_by_pool.ZCASH.rig_count).toBe(2);
@@ -84,13 +96,22 @@ describe('adminStatsController.getAdminStats', () => {
 
   it('returns zeros gracefully when tables are empty', async () => {
     pool.query.mockResolvedValue({ rows: [] });
+    getBacking.mockResolvedValue({
+      KASPA: { mined_total: 0 },
+      ZCASH: { mined_total: 0 },
+      LTC_DOGE: { mined_total: 0 },
+      XMR: { mined_total: 0 },
+      generated_at: '2026-08-20T06:00:00Z',
+    });
 
     const res = makeRes();
     await getAdminStats({}, res);
 
     expect(res.statusCode).toBe(200);
     expect(res.body.capacity_by_pool).toEqual({});
-    expect(res.body.payouts_by_pool).toEqual({});
+    // LIVE production comes from Real Backing — every pool is present even at 0.
+    expect(Object.keys(res.body.payouts_by_pool).sort()).toEqual(['KASPA', 'LTC_DOGE', 'XMR', 'ZCASH']);
+    expect(res.body.payouts_by_pool.KASPA.total_crypto).toBe(0);
     expect(res.body.ledger_by_pool).toEqual({});
     expect(res.body.treasury.protocol_fees_usdc).toBe(0);
     expect(res.body.users.count).toBe(0);
