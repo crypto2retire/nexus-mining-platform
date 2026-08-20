@@ -180,6 +180,16 @@ body {
   text-align: center;
 }
 
+.admin-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.admin-title-row .admin-title {
+  margin: 0; /* override the standalone bottom margin inside the flex row */
+}
+
 .summary-label {
   display: block;
   color: var(--muted);

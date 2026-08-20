@@ -12,12 +12,15 @@ const { pool } = require('../config/db');
 async function getAdminStats(_req, res) {
   try {
     const [capacity, payouts, fees, ledger, users, deposits] = await Promise.all([
-      // 1. Total virtual mining capacity per coin (active rigs only).
+      // 1. Total virtual mining capacity per coin (ACTIVE credits only —
+      // expired 0-GH/s rigs must not count; Kevin 2026-08-20).
       pool.query(
         `SELECT target_pool,
                 COALESCE(SUM(virtual_hashrate), 0) AS total_hashrate,
                 COUNT(*) AS rig_count
            FROM virtual_rigs
+          WHERE rental_expires_at > CURRENT_TIMESTAMP
+            AND virtual_hashrate > 0
           GROUP BY target_pool
           ORDER BY target_pool`
       ),

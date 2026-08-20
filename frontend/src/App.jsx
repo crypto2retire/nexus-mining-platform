@@ -50,6 +50,10 @@ export default function App() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  // Bumped after every successful dashboard fetch so the admin panel (which
+  // self-fetches) can re-load after purchases/deposits — it was stuck showing
+  // pre-purchase numbers (KAS 25 GH/s while the card showed 75).
+  const [dataVersion, setDataVersion] = useState(0);
 
   const fetchDashboard = async (address) => {
     const addr = (address ?? wallet).trim().toLowerCase();
@@ -66,6 +70,7 @@ export default function App() {
         throw new Error(msg);
       }
       setData(await res.json());
+      setDataVersion((v) => v + 1);
       setConnected(true);
     } catch (err) {
       setConnected(false);
@@ -318,7 +323,7 @@ export default function App() {
 
             <GetStarted depositAddress={data.deposit_address} />
 
-            {data.is_admin && <AdminPanel wallet={wallet} />}
+            {data.is_admin && <AdminPanel wallet={wallet} refreshKey={dataVersion} />}
 
             <section className="mining-grid">
               {POOLS.map((pool) => (

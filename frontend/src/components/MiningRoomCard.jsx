@@ -93,8 +93,17 @@ export default function MiningRoomCard({
           </div>
         )}
         {ps && (
-          <div className="stat" title="Balance owed to this room's wallet at the mining pool, the pool's minimum payout, and the estimated time until the pool pays at the observed accrual rate.">
-            <span className="stat-label">Pool payout</span>
+          <div
+            className="stat"
+            title={
+              ps.watch_mode === 'balance-delta'
+                ? "On-chain balance received at this room's wallet. F2Pool hides its internal unpaid balance for ltc1 addresses, so this shows actual payments only — the pool pays the wallet at the threshold."
+                : "Balance owed to this room's wallet at the mining pool, the pool's minimum payout, and the estimated time until the pool pays at the observed accrual rate."
+            }
+          >
+            <span className="stat-label">
+              {ps.watch_mode === 'balance-delta' ? 'Paid to wallet' : 'Pool payout'}
+            </span>
             <span className="stat-value accent">
               {poolUnpaid != null
                 ? `${poolUnpaid === 0 ? '0.0000' : poolUnpaid < 0.01 ? poolUnpaid.toPrecision(3) : poolUnpaid.toFixed(4)} ${ps.unpaid_unit || ''}`

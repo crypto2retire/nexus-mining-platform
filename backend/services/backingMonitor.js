@@ -57,8 +57,14 @@ function liveRealHash(pool, activeRentals) {
 async function buildBacking() {
   const [virtRows, rentalRows, payoutRows] = await Promise.all([
     pool.query(
+      // ACTIVE credits only — expired 0-GH/s rigs are NOT "sold" (Kevin
+      // 2026-08-20: "Rigs sold 1" with 0 GH/s and no real backing confused
+      // the LTC/XMR rows).
       `SELECT target_pool, COALESCE(SUM(virtual_hashrate),0) AS vghs, COUNT(*) AS rigs
-         FROM virtual_rigs GROUP BY target_pool`
+         FROM virtual_rigs
+        WHERE rental_expires_at > CURRENT_TIMESTAMP
+          AND virtual_hashrate > 0
+        GROUP BY target_pool`
     ),
     pool.query(
       `SELECT rig_id, target_pool, mrr_rental_id, rig_name, rig_rpi, cost_usd, length_hours

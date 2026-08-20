@@ -17,7 +17,7 @@ const POOL_KEYS = ['ZCASH', 'KASPA', 'LTC_DOGE', 'XMR'];
  * Every admin call sends the wallet as the x-wallet header so the backend
  * can enforce the same allow-list on each request.
  */
-export default function AdminPanel({ wallet }) {
+export default function AdminPanel({ wallet, refreshKey = 0 }) {
   const [withdrawals, setWithdrawals] = useState(null);
   const [payoutStatus, setPayoutStatus] = useState(null);
   const [stats, setStats] = useState(null);
@@ -55,7 +55,9 @@ export default function AdminPanel({ wallet }) {
 
   useEffect(() => {
     if (wallet) loadAll();
-  }, [wallet, loadAll]);
+    // refreshKey bumps after every dashboard fetch (purchases, deposits,
+    // claims) — re-load the admin tables so they never go stale.
+  }, [wallet, loadAll, refreshKey]);
 
   const markPaid = async (id) => {
     const txHash = (txHashes[id] || '').trim();
@@ -119,7 +121,12 @@ export default function AdminPanel({ wallet }) {
 
   return (
     <section className="admin-panel">
-      <h2 className="admin-title">⚙ Admin</h2>
+      <div className="admin-title-row">
+        <h2 className="admin-title">⚙ Admin</h2>
+        <button className="btn-secondary btn-small" onClick={() => loadAll()}>
+          ↻ Refresh
+        </button>
+      </div>
       {msg && <div className="admin-msg">{msg}</div>}
 
       <div className="admin-grid">
