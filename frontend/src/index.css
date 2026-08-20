@@ -705,3 +705,44 @@ button:disabled {
   font-size: 0.8rem;
   margin: 0;
 }
+
+/* Short-session picker (hybrid model — slices of the room's live rigs). */
+.session-picker {
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px dashed var(--border);
+}
+.session-picker-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+.session-picker-title {
+  font-weight: 700;
+  font-size: 0.85rem;
+}
+.session-spare {
+  font-size: 0.75rem;
+  color: var(--accent);
+}
+.session-spare-low {
+  color: var(--muted);
+}
+.session-picker-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.btn-session {
+  flex: 1 1 0;
+  min-width: 5.5rem;
+  padding: 0.55rem 0.6rem;
+  font-size: 0.8rem;
+}
+.session-picker-note {
+  margin-top: 0.5rem;
+  font-size: 0.72rem;
+  color: var(--muted);
+}

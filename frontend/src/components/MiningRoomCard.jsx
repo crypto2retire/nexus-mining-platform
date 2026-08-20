@@ -13,6 +13,7 @@ export default function MiningRoomCard({
   title, pool, rig, pendingReward, upgradeCost, renewCost,
   onUpgrade, onRenew, onClaim, onWithdraw, onReinvest,
   discountPct, pendingDoge, realBacking, payoutStatus,
+  sessionPrices, spareGhs, onBuySession,
 }) {
   const [animating, setAnimating] = useState(false);
   const [now, setNow] = useState(Date.now());
@@ -34,6 +35,20 @@ export default function MiningRoomCard({
   const poolUnpaid = ps?.unpaid != null ? Number(ps.unpaid) : null;
   const threshold = ps?.threshold != null ? Number(ps.threshold) : null;
   const etaText = ps?.eta_hours != null ? fmtEta(ps.eta_hours) : null;
+
+  // Session picker: spare capacity arrives in the pool's DISPLAY unit
+  // (GH/s / KH/s / H/s) — normalize to GH/s so the 25 GH/s slot compares
+  // correctly across rooms (XMR spare of 2353 H/s = 0.000002 GH/s).
+  const realUnit = backing ? backing.real_unit : 'GH/s';
+  const spareGhsNorm =
+    spareGhs == null
+      ? null
+      : realUnit === 'KH/s'
+        ? Number(spareGhs) / 1e3
+        : realUnit === 'H/s'
+          ? Number(spareGhs) / 1e9
+          : Number(spareGhs);
+  const canSell = spareGhsNorm != null && spareGhsNorm >= 25;
 
   // Live countdown while the rental window is active.
   useEffect(() => {
@@ -174,6 +189,43 @@ export default function MiningRoomCard({
           Withdraw {COIN_NAMES[pool] || pool}
         </button>
       </div>
+      {sessionPrices && (
+        <div className="session-picker">
+          <div className="session-picker-head">
+            <span className="session-picker-title">⚡ Short sessions — 25 GH/s slice</span>
+            {spareGhs != null && (
+              <span className={`session-spare ${canSell ? '' : 'session-spare-low'}`}>
+                Spare: {spareGhs >= 100 ? spareGhs.toFixed(0) : spareGhs.toFixed(1)} {realUnit}
+              </span>
+            )}
+          </div>
+          <div className="session-picker-buttons">
+            {Object.entries(sessionPrices)
+              .map(([hours, sessionPrice]) => ({ hours: Number(hours), price: sessionPrice }))
+              .sort((a, b) => a.hours - b.hours)
+              .map(({ hours, price: sessionPrice }) => (
+                <button
+                  key={hours}
+                  className="btn-secondary btn-session"
+                  disabled={!canSell || price == null}
+                  onClick={() => pulse(() => onBuySession(hours))}
+                  title={
+                    canSell
+                      ? `25 GH/s for ${hours}h — a slice of the room's REAL running hashrate. No new rental, so shorter sessions cost more per hour.${discountPct > 0 ? ` ${discountPct}% multi-coin discount applied` : ''}`
+                      : realUnit !== 'GH/s'
+                        ? 'No sellable spare capacity right now'
+                        : `Room has ${spareGhs != null ? spareGhs.toFixed(1) : '—'} GH/s spare — need 25`
+                  }
+                >
+                  {hours}h — {sessionPrice != null ? price(sessionPrice) : '—'}
+                </button>
+              ))}
+          </div>
+          <div className="session-picker-note">
+            Drawn from the room's live rigs — the rig is already running, no new rental.
+          </div>
+        </div>
+      )}
     </div>
   );
 }

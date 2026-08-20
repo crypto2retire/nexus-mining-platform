@@ -127,6 +127,33 @@ export default function App() {
     }
   };
 
+  // BUY SESSION: a short hashrate slice (1h-24h, 25 GH/s slot) drawn from the
+  // room's SPARE real capacity — no new marketplace rental, the rig is already
+  // running. Higher markup = shorter session. Idempotent like rent.
+  const buySession = async (pool, hours) => {
+    try {
+      setError('');
+      const requestId = crypto.randomUUID
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const res = await fetch(`${API_BASE}/api/rigs/session`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ wallet, target_pool: pool, request_id: requestId, hours, ghs: 25 }),
+      });
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error || 'Session purchase failed');
+      alert(
+        `⏱ Session rented! ${result.ghs} GH/s for ${result.hours}h — $${Number(result.price).toFixed(2)}\n` +
+          `Window: until ${new Date(result.rental_expires_at).toLocaleString()}\n` +
+          `Room spare left: ${Number(result.room_spare_ghs ?? 0).toFixed(1)} GH/s`
+      );
+      await fetchDashboard();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
   // Reinvest: mined tokens fund the next rental window directly — no USDC
   // deposit step. Same idempotent rent path behind the scenes.
   const reinvest = async (pool) => {
@@ -312,6 +339,9 @@ export default function App() {
                   pendingDoge={data.pending_rewards_2?.[pool.key] ?? 0}
                   realBacking={data.backing?.[pool.key] ?? null}
                   payoutStatus={data.payout_status?.[pool.key] ?? null}
+                  sessionPrices={data.session_prices?.[pool.key] ?? null}
+                  spareGhs={data.spare_ghs?.[pool.key] ?? null}
+                  onBuySession={(hours) => buySession(pool.key, hours)}
                 />
               ))}
             </section>
