@@ -11,7 +11,7 @@ const { pool } = require('../config/db');
 
 async function getAdminStats(_req, res) {
   try {
-    const [capacity, payouts, fees, ledger, users, deposits] = await Promise.all([
+    const [capacity, accrual, distributed, fees, ledger, users, deposits] = await Promise.all([
       // 1. Total virtual mining capacity per coin (ACTIVE credits only —
       // expired 0-GH/s rigs must not count; Kevin 2026-08-20).
       pool.query(
@@ -24,13 +24,23 @@ async function getAdminStats(_req, res) {
           GROUP BY target_pool
           ORDER BY target_pool`
       ),
-      // 2. Real rewards earned per coin (actual pool payouts received).
+      // 2. Real rewards earned per coin — the pool's actual production
+      //    (room_accrual.earned_total = unpaid at pool + settled pool
+      //    payments). NOT the game's distribution rows: real_pool_payouts
+      //    only holds ACCRUAL rows of what was handed to users, so summing
+      //    it showed 0.049 KAS while the pool wallet actually held 1.69 KAS.
+      pool.query(
+        `SELECT pool AS target_pool,
+                COALESCE(SUM(earned_total), 0) AS total_crypto
+           FROM room_accrual
+          GROUP BY pool
+          ORDER BY pool`
+      ),
+      // 2b. What the platform actually DISTRIBUTED (the 5% treasury cut is
+      //     taken from distributed amounts, not from total production).
       pool.query(
         `SELECT target_pool,
-                COUNT(*) AS payout_count,
-                COALESCE(SUM(total_crypto_reward_1), 0) AS total_crypto,
-                COALESCE(SUM(total_crypto_reward_1) * 0.95, 0) AS users_share_crypto,
-                COALESCE(SUM(total_crypto_reward_1) * 0.05, 0) AS treasury_share_crypto
+                COALESCE(SUM(total_crypto_reward_1), 0) AS distributed_crypto
            FROM real_pool_payouts
           GROUP BY target_pool
           ORDER BY target_pool`
@@ -74,12 +84,22 @@ async function getAdminStats(_req, res) {
     }
 
     const payoutsByPool = {};
-    for (const r of payouts.rows) {
+    const distributedByPool = {};
+    for (const r of distributed.rows) {
+      distributedByPool[r.target_pool] = Number(r.distributed_crypto);
+    }
+    for (const r of accrual.rows) {
+      // Keep the same response shape the frontend expects.
+      //   total_crypto          = REAL production (pool wallet truth)
+      //   treasury_share_crypto = 5% of what was DISTRIBUTED to users (the
+      //                           platform's actual 5% cut, not 5% of the
+      //                           still-unpaid balance sitting at the pool)
+      const distributedAmt = distributedByPool[r.target_pool] ?? 0;
       payoutsByPool[r.target_pool] = {
-        payout_count: Number(r.payout_count),
+        payout_count: null,
         total_crypto: Number(r.total_crypto),
-        users_share_crypto: Number(r.users_share_crypto),
-        treasury_share_crypto: Number(r.treasury_share_crypto),
+        users_share_crypto: Number(r.total_crypto) * 0.95,
+        treasury_share_crypto: distributedAmt * 0.05,
       };
     }
 

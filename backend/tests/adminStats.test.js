@@ -39,15 +39,14 @@ describe('adminStatsController.getAdminStats', () => {
       }) // capacity
       .mockResolvedValueOnce({
         rows: [
-          {
-            target_pool: 'KASPA',
-            payout_count: '2',
-            total_crypto: '100.00000000',
-            users_share_crypto: '95.00000000',
-            treasury_share_crypto: '5.00000000',
-          },
+          { target_pool: 'KASPA', total_crypto: '100.00000000' },
         ],
-      }) // payouts
+      }) // accrual (REAL production)
+      .mockResolvedValueOnce({
+        rows: [
+          { target_pool: 'KASPA', distributed_crypto: '40.00000000' },
+        ],
+      }) // distributed (for treasury 5%)
       .mockResolvedValueOnce({
         rows: [{ total_fees_usdc: '12.50', fee_count: '3' }],
       }) // protocol fees
@@ -71,12 +70,12 @@ describe('adminStatsController.getAdminStats', () => {
     await getAdminStats({}, res);
 
     // Guard: confirm the mock chain consumed exactly as expected.
-    expect(pool.query).toHaveBeenCalledTimes(6);
+    expect(pool.query).toHaveBeenCalledTimes(7);
     expect(res.statusCode).toBe(200);
     expect(res.body.capacity_by_pool.KASPA.total_hashrate).toBe(125);
     expect(res.body.capacity_by_pool.ZCASH.rig_count).toBe(2);
     expect(res.body.payouts_by_pool.KASPA.total_crypto).toBe(100);
-    expect(res.body.payouts_by_pool.KASPA.treasury_share_crypto).toBe(5);
+    expect(res.body.payouts_by_pool.KASPA.treasury_share_crypto).toBe(2); // 5% of distributed (40)
     expect(res.body.treasury.protocol_fees_usdc).toBe(12.5);
     expect(res.body.ledger_by_pool.KASPA.unclaimed_crypto).toBe(60);
     expect(res.body.users.count).toBe(4);

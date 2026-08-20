@@ -79,7 +79,10 @@ async function fetchLiveRealHash(pool, activeRentals = []) {
   }
   if (pool === 'XMR') {
     const data = await fetchPoolAccount(pool);
-    const h = data?.stats?.hashrate_24h ?? data?.hashrate_24h;
+    // Prefer the 1h average (fresh rental: 24h avg dilutes with pre-rental
+    // zeros — was showing 2715 H/s while the rig delivers ~13.6 KH/s).
+    // Fall back to current, then 24h.
+    const h = data?.stats?.hashrate_1h ?? data?.stats?.hashrate ?? data?.stats?.hashrate_24h;
     if (h == null) return null;
     return Number(h);
   }

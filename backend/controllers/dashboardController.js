@@ -135,8 +135,18 @@ async function getDashboard(req, res) {
       const spareGhsByPool = {};
       for (const pool of pools) {
         const real = backing[pool]?.real_hash;
+        const unit = backing[pool]?.real_unit || 'GH/s';
         const active = activeGhsByPool[pool] || 0;
-        spareGhsByPool[pool] = real == null ? null : Math.max(0, Number(real) - active);
+        // real_hash arrives in the pool's DISPLAY unit (KH/s for ZEC, H/s
+        // for XMR, GH/s for KAS/LTC) while active credits are always GH/s.
+        // Convert both to GH/s before subtracting — previously XMR spare
+        // was 2715 H/s − 25 GH/s = 2690 (nonsense, showed fake spare on an
+        // oversold room).
+        const realGhs =
+          unit === 'KH/s' ? Number(real) / 1e3
+          : unit === 'H/s' ? Number(real) / 1e9
+          : Number(real);
+        spareGhsByPool[pool] = real == null ? null : Math.max(0, realGhs - active);
       }
 
       // Pool payout status per room: what the pool owes the wallet (unpaid),

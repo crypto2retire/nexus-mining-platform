@@ -55,7 +55,7 @@ function liveRealHash(pool, activeRentals) {
 }
 
 async function buildBacking() {
-  const [virtRows, rentalRows, payoutRows] = await Promise.all([
+  const [virtRows, rentalRows, payoutRows, accrualRows] = await Promise.all([
     pool.query(
       // ACTIVE credits only — expired 0-GH/s rigs are NOT "sold" (Kevin
       // 2026-08-20: "Rigs sold 1" with 0 GH/s and no real backing confused
@@ -76,10 +76,18 @@ async function buildBacking() {
               COALESCE(SUM(total_crypto_reward_2),0) AS mined_2
          FROM real_pool_payouts GROUP BY target_pool`
     ),
+    // Real production per room = unpaid balance at the pool + any settled
+    // pool payments (room_accrual.earned_total). This is the number that
+    // matches the pool wallet — NOT the game's distribution rows, which
+    // only track what was handed to users (was showing 0.049 vs 1.69 KAS).
+    pool.query(
+      `SELECT pool, earned_total FROM room_accrual`
+    ),
   ]);
 
   const virt = Object.fromEntries(virtRows.rows.map((r) => [r.target_pool, r]));
   const payouts = Object.fromEntries(payoutRows.rows.map((r) => [r.target_pool, r]));
+  const accrual = Object.fromEntries(accrualRows.rows.map((r) => [r.pool, r]));
   const rentalsByPool = {};
   for (const r of rentalRows.rows) {
     (rentalsByPool[r.target_pool] = rentalsByPool[r.target_pool] || []).push(r);
@@ -120,7 +128,10 @@ async function buildBacking() {
       real_unit: REAL_UNITS[poolName],
       pool_unpaid: unpaid,
       pool_unpaid_unit: { ZCASH: 'ZEC', KASPA: 'KAS', LTC_DOGE: 'LTC', XMR: 'XMR' }[poolName],
-      mined_total: payouts[poolName] ? Number(payouts[poolName].mined_1) : 0,
+      // Real production: earned_total (unpaid + settled pool payments). The
+      // payouts table only holds game distributions (ACCRUAL rows) — using
+      // it made KAS show 0.049 while the pool wallet held 1.69 KAS.
+      mined_total: accrual[poolName] ? Number(accrual[poolName].earned_total) : (payouts[poolName] ? Number(payouts[poolName].mined_1) : 0),
       mined_2: payouts[poolName] ? Number(payouts[poolName].mined_2) : 0,
     };
   }
