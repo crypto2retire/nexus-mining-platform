@@ -63,7 +63,9 @@ async function rentalRealGhs(mrrRentalId) {
     const avg = s?.data?.hashrate?.average;
     const pick = live && Number(live.hash) > 0 ? live : avg;
     if (!pick) return 0;
-    const mult = { kh: 1e-3, mh: 1, gh: 1, th: 1e3 }[String(pick.type || '').toLowerCase()];
+    // Convert to GH/s (the base unit). MRR types: kh/mh/gh/th.
+    // 1 KH = 1e-6 GH, 1 MH = 1e-3 GH, 1 GH = 1, 1 TH = 1e3 GH.
+    const mult = { kh: 1e-6, mh: 1e-3, gh: 1, th: 1e3 }[String(pick.type || '').toLowerCase()];
     if (mult === undefined) return 0;
     return Number(pick.hash || 0) * mult;
   } catch {
