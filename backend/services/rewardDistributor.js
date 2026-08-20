@@ -323,9 +323,9 @@ async function distributeAccrued(targetPool) {
     const payoutResult = await client.query(
       `INSERT INTO real_pool_payouts
         (target_pool, total_crypto_reward_1, total_network_hashrate, period_start, period_end, source)
-       VALUES ($1, $2, $3, $4, $5, 'ACCRUAL')
+       VALUES ($1, $2, 0, $3, $4, 'ACCRUAL')
        RETURNING payout_id`,
-      [targetPool, delta, null, periodStart, periodEnd]
+      [targetPool, delta, periodStart, periodEnd]
     );
     const payoutId = payoutResult.rows[0].payout_id;
 
