@@ -49,38 +49,12 @@ async function logRigChange(client, userId, targetPool, hashrate) {
 }
 
 /**
- * GoMiner resume: wake a DORMANT miner back to its current level's hashrate
- * (logs a hashrate change so time-weighted contribution resumes). Called when
- * the owner upgrades the rig or tops up their balance — the "spend to grow"
- * loop.
- * @returns {Promise<number>} number of rigs resumed
- */
-async function resumeDormantRigs(client, userId) {
-  const dormant = await client.query(
-    `SELECT rig_id, target_pool, virtual_hashrate
-       FROM virtual_rigs
-      WHERE user_id = $1 AND maintenance_status = 'DORMANT'`,
-    [userId]
-  );
-  for (const rig of dormant.rows) {
-    await client.query(
-      `UPDATE virtual_rigs
-          SET maintenance_status = 'ACTIVE', dormant_at = NULL, updated_at = CURRENT_TIMESTAMP
-        WHERE rig_id = $1`,
-      [rig.rig_id]
-    );
-    await logRigChange(client, userId, rig.target_pool, Number(rig.virtual_hashrate));
-  }
-  if (dormant.rowCount > 0) {
-    console.log(`▶ Resumed ${dormant.rowCount} dormant miner(s) for user ${userId}`);
-  }
-  return dormant.rowCount;
-}
-
-/**
  * Per-user contributions for a pool over [start, end], using history.
  * Users with a rig but no history (pre-logging) fall back to their current
  * hashrate × full period. Returns [{user_id, contribution}] with > 0 only.
+ *
+ * RENTAL model (2026-08-20): the expiry sweeper logs 0-hashrate rows when a
+ * window passes, so an expired rental contributes 0 here automatically.
  */
 async function contributionsForPool(client, targetPool, start, end) {
   const { rows } = await client.query(
@@ -118,4 +92,49 @@ async function contributionsForPool(client, targetPool, start, end) {
   return result;
 }
 
-module.exports = { computeContributions, logRigChange, contributionsForPool, resumeDormantRigs };
+/**
+ * Append a real-hashrate measurement for a room (called by the backing
+ * monitor on each refresh and by the distributor before splitting a payout).
+ * One row per refresh is fine (60s TTL + per-payout) — the segment math
+ * below treats each row as effective until the next one.
+ */
+async function logRealHashChange(client, targetPool, hashrate, unit = 'GH/s') {
+  await client.query(
+    'INSERT INTO real_rig_hashrate_history (target_pool, hashrate, unit) VALUES ($1, $2, $3)',
+    [targetPool, hashrate, unit]
+  );
+}
+
+/**
+ * Real hash-hours for a pool over [start, end] — the DENOMINATOR for the
+ * hybrid session payout. Returns the time-weighted sum of the pool wallet's
+ * reported hashrate, or 0 when no measurement exists in/around the period.
+ */
+async function realHashHoursForPool(client, targetPool, start, end) {
+  const { rows } = await client.query(
+    `SELECT changed_at, hashrate
+       FROM real_rig_hashrate_history
+      WHERE target_pool = $1 AND changed_at <= $2
+      ORDER BY changed_at`,
+    [targetPool, end]
+  );
+  if (rows.length === 0) return 0;
+  // The last row before the period also counts (its value persists into the
+  // period until superseded) — include it by using max(rows) as the start of
+  // the first segment when it predates `start`.
+  const s = start.getTime();
+  const e = end.getTime();
+  let total = 0;
+  for (let i = 0; i < rows.length; i++) {
+    const segStart = Math.max(new Date(rows[i].changed_at).getTime(), s);
+    const segEnd =
+      i + 1 < rows.length ? Math.min(new Date(rows[i + 1].changed_at).getTime(), e) : e;
+    if (segEnd > segStart) {
+      total += Number(rows[i].hashrate) * ((segEnd - segStart) / 3600000);
+    }
+    if (i + 1 < rows.length && new Date(rows[i + 1].changed_at).getTime() > e) break;
+  }
+  return total;
+}
+
+module.exports = { computeContributions, logRigChange, contributionsForPool, logRealHashChange, realHashHoursForPool };

@@ -1,8 +1,9 @@
 /**
- * GoMiner model tests (008_gominer_model):
- *  - distributePayout deducts per-GH/s maintenance from each payout
- *  - a payout that can't cover maintenance → miner DORMANT + 0 hashrate
- *  - reinvestRig converts mined tokens into the next upgrade
+ * HYBRID session model tests (014_session_capacity, rewritten 2026-08-20):
+ *  - distributePayout splits a pool payout by CREDIT hash-hours over REAL
+ *    rig hash-hours (fair slices); the platform keeps the residual.
+ *  - 95/5 on participant slices; NO maintenance deduction, NO DORMANT pause
+ *  - reinvestRig converts mined tokens into the next rental window
  */
 
 jest.mock('../config/db', () => ({
@@ -10,6 +11,9 @@ jest.mock('../config/db', () => ({
 }));
 jest.mock('../services/priceOracle', () => ({
   getLiveBtcPrice: jest.fn(),
+}));
+jest.mock('../services/roomHash', () => ({
+  fetchLiveRealHash: jest.fn(),
 }));
 jest.mock('../services/hashrateRenter', () => ({
   placeHashpowerOrder: jest.fn(),
@@ -22,13 +26,18 @@ jest.mock('axios', () => ({ get: jest.fn() }));
 
 const { pool } = require('../config/db');
 const axios = require('axios');
+const { fetchLiveRealHash } = require('../services/roomHash');
 const { distributePayout, distributeMergedReward } = require('../services/rewardDistributor');
-const { reinvestRig, setMineAtLoss } = require('../controllers/upgradeController');
+const { reinvestRig } = require('../controllers/upgradeController');
 const { getLiveBtcPrice } = require('../services/priceOracle');
 const { placeHashpowerOrder } = require('../services/hashrateRenter');
 
 const REAL_ENV = { ...process.env };
 const WALLET = '0x1111111111111111111111111111111111111111';
+
+// The room's REAL hashrate (pool wallet measurement) — 25 GH/s credit is a
+// slice of it: share = 25/195.5, NOT 25/25. The rest is platform residual.
+const REAL_HASH = 195.5;
 
 function makeRes() {
   const res = { statusCode: null, body: null };
@@ -42,35 +51,31 @@ afterEach(() => {
   jest.clearAllMocks();
 });
 
-// ---- distributePayout: maintenance deduction + dormancy -------------------
+// ---- distributePayout: rental model (95/5, no maintenance) ----------------
 
-function distributionClient({ rate = 0.006, price = 0.05, hasHistory = true, mineAtLoss = false, usdcBalance = '10.0000', coins = 0 } = {}) {
+function distributionClient({ price = 0.05, hasHistory = true } = {}) {
   const now = Date.now();
   const start = new Date(now - 24 * 3600 * 1000); // 24h period
+  fetchLiveRealHash.mockResolvedValue(REAL_HASH);
+  // LTC_DOGE path reads active rentals via pool.query BEFORE the tx.
+  pool.query.mockResolvedValue({ rowCount: 0, rows: [] });
   const client = {
     query: jest.fn(async (sql, params = []) => {
       if (sql === 'BEGIN' || sql === 'COMMIT' || sql === 'ROLLBACK') return { rowCount: 1, rows: [] };
       if (sql.includes('SELECT payout_timestamp FROM real_pool_payouts')) return { rowCount: 0, rows: [] };
       if (sql.includes('SELECT MIN(changed_at)')) return { rowCount: 0, rows: [] };
       if (sql.includes('INSERT INTO real_pool_payouts')) return { rowCount: 1, rows: [{ payout_id: 'payout-1' }] };
+      if (sql.includes('SELECT changed_at, hashrate') && sql.includes('real_rig_hashrate_history')) {
+        // Room was REALLY delivering 195.5 GH/s the whole period.
+        return { rowCount: 1, rows: [{ changed_at: start, hashrate: REAL_HASH }] };
+      }
+      if (sql.includes('INSERT INTO real_rig_hashrate_history')) return { rowCount: 1, rows: [] };
       if (sql.includes('FROM rig_hashrate_history') && sql.includes('SELECT user_id, changed_at, hashrate')) {
         return hasHistory
           ? { rowCount: 1, rows: [{ user_id: 'user-1', changed_at: start, hashrate: '25.0000' }] }
           : { rowCount: 0, rows: [] };
       }
       if (sql.includes('SELECT user_id, virtual_hashrate FROM virtual_rigs')) return { rowCount: 0, rows: [] };
-      if (sql.includes('SELECT COUNT(*) AS c FROM virtual_rigs')) {
-        return { rowCount: 1, rows: [{ c: String(coins) }] };
-      }
-      if (sql.includes('SELECT usdc_per_ghs_per_day FROM pool_maintenance_rates')) {
-        return { rowCount: 1, rows: [{ usdc_per_ghs_per_day: String(rate) }] };
-      }
-      if (sql.includes('SELECT mine_at_loss FROM virtual_rigs')) {
-        return { rowCount: 1, rows: [{ mine_at_loss: mineAtLoss }] };
-      }
-      if (sql.includes('SELECT wallet_id, usdc_balance FROM user_wallets')) {
-        return { rowCount: 1, rows: [{ wallet_id: 'wallet-1', usdc_balance: String(usdcBalance) }] };
-      }
       if (sql.includes('INSERT INTO user_rewards_ledger')) return { rowCount: 1, rows: [] };
       if (sql.includes('INSERT INTO protocol_revenue_ledger')) return { rowCount: 1, rows: [] };
       if (sql.includes('INSERT INTO maintenance_fee_ledger')) return { rowCount: 1, rows: [] };
@@ -89,117 +94,144 @@ function distributionClient({ rate = 0.006, price = 0.05, hasHistory = true, min
   return client;
 }
 
-describe('distributePayout — GoMiner maintenance', () => {
-  test('deducts maintenance per GH/s/day from gross, books ledger, stays ACTIVE', async () => {
-    const client = distributionClient({ rate: 0.006, price: 0.05 });
-    // 25 GH/s for 24h → 600 hashrate-hours, avg 25 GH/s, 1 day.
-    // maintenance = 25 × 0.006 × 1 = $0.15 → /0.05 = 3.0 KAS.
-    // gross 100 KAS, fee 5, maintenance 3 → net 92.
+describe('distributePayout — hybrid (fair slices over real hashrate)', () => {
+  test('splits a payout by credit over REAL hash-hours; residual stays with the platform', async () => {
+    const client = distributionClient({ price: 0.05 });
+    // 25 GH/s credit x 24h = 600 hash-hours; the room REALLY delivered
+    // 195.5 GH/s x 24h = 4692 real hash-hours.
+    // share = 600/4692 = 12.788% of 100 KAS = 12.7877 gross -> fee 0.6394 -> net 12.1483.
+    // Residual 87.8517 KAS is the operator baseline + unsold capacity.
     const result = await distributePayout('KASPA', 100, 1000);
 
     expect(result.payout_id).toBe('payout-1');
     expect(result.participants).toBe(1);
+    expect(result.total_contribution).toBeCloseTo(4692, 3);
+    expect(result.residual_coin).toBeCloseTo(87.8517, 3);
 
     const ledgerInsert = client.query.mock.calls.find(([sql]) => sql.includes('INSERT INTO user_rewards_ledger'));
     expect(ledgerInsert).toBeTruthy();
-    // params: [user, payout, net, fee, contrib, total, share, maintenance]
-    expect(ledgerInsert[1][2]).toBeCloseTo(92, 6);
-    expect(ledgerInsert[1][3]).toBeCloseTo(5, 6);
-    expect(ledgerInsert[1][7]).toBeCloseTo(3, 6);
+    // params: [user, payout, net, fee, contrib, total, share]
+    expect(Number(ledgerInsert[1][2])).toBeCloseTo(12.1483, 3);
+    expect(Number(ledgerInsert[1][3])).toBeCloseTo(0.6394, 3);
+    // maintenance_fee_1 is a SQL literal 0 in the rental model (no deduction).
+    expect(ledgerInsert[0]).toContain(', 0)');
 
+    // Residual booked as platform revenue (UNSOLD_CAPACITY), USDC at spot.
+    const residual = client.query.mock.calls.find(
+      ([sql, p]) => sql.includes('INSERT INTO protocol_revenue_ledger') && p && p[1] === 'UNSOLD_CAPACITY'
+    );
+    expect(residual).toBeTruthy();
+    expect(Number(residual[1][0])).toBeCloseTo(87.8517 * 0.05, 3);
+
+    // No maintenance ledger rows in the rental model.
     const maintLedger = client.query.mock.calls.find(([sql]) => sql.includes('INSERT INTO maintenance_fee_ledger'));
-    expect(maintLedger).toBeTruthy();
-    expect(Number(maintLedger[1][5])).toBeCloseTo(0.15, 6); // amount_usdc
+    expect(maintLedger).toBeFalsy();
 
-    // No dormancy for a profitable miner.
+    // No dormancy logic exists in the rental model.
     const dormancy = client.query.mock.calls.find(([sql]) => sql.includes("maintenance_status = 'DORMANT'"));
     expect(dormancy).toBeFalsy();
   });
 
-  test('payout that cannot cover maintenance → DORMANT + zero hashrate (GoMiner pause)', async () => {
-    const client = distributionClient({ rate: 0.006, price: 0.05 });
-    // Same 25 GH/s × 1 day → maintenance 3.0 KAS, but the payout is only 1 KAS.
-    // gross 1, fee 0.05 → remaining 0.95 → net 0, shortfall → DORMANT.
+  test('a tiny payout still nets the slice — no DORMANT, no maintenance eating the yield', async () => {
+    const client = distributionClient({ price: 0.05 });
+    // 1 KAS payout: net = 1 x (600/4692) x 0.95 = 0.1215.
     await distributePayout('KASPA', 1, 1000);
 
     const ledgerInsert = client.query.mock.calls.find(([sql]) => sql.includes('INSERT INTO user_rewards_ledger'));
-    expect(Number(ledgerInsert[1][2])).toBeCloseTo(0, 6); // net clamped at 0
-    expect(Number(ledgerInsert[1][7])).toBeCloseTo(0.95, 6); // maintenance ate everything available
+    expect(Number(ledgerInsert[1][2])).toBeCloseTo(0.1215, 3);
+    expect(ledgerInsert[0]).toContain(', 0)');
 
     const dormancy = client.query.mock.calls.find(([sql]) => sql.includes("maintenance_status = 'DORMANT'"));
-    expect(dormancy).toBeTruthy();
-    expect(dormancy[1][0]).toBe('user-1');
-    expect(dormancy[1][1]).toBe('KASPA');
-
-    // A 0-hashrate history row stops the miner earning future shares
-    // (VALUES ($1,$2,0) — the zero is a literal).
+    expect(dormancy).toBeFalsy();
+    // No 0-hashrate history row — the rig keeps mining until its window ends.
     const zero = client.query.mock.calls.find(
-      ([sql]) => sql.includes('INSERT INTO rig_hashrate_history') && /VALUES \(\$1, \$2, 0\)/.test(sql)
+      ([sql, p]) => sql.includes('INSERT INTO rig_hashrate_history') && p && Number(p[2]) === 0
     );
-    expect(zero).toBeTruthy();
+    expect(zero).toBeFalsy();
   });
 
-  test('price feed down → still distributes, skips maintenance, no dormancy', async () => {
-    const client = distributionClient({ rate: 0.006, price: null });
+  test('price feed availability does not affect distribution — residual booked at 0 USDC', async () => {
+    const client = distributionClient({ price: null });
     axios.get.mockRejectedValue(new Error('coingecko down'));
-    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
 
     await distributePayout('KASPA', 100, 1000);
 
     const ledgerInsert = client.query.mock.calls.find(([sql]) => sql.includes('INSERT INTO user_rewards_ledger'));
-    expect(Number(ledgerInsert[1][2])).toBeCloseTo(95, 6); // net = gross - fee only
-    expect(Number(ledgerInsert[1][7])).toBe(0); // no maintenance charged
-    const dormancy = client.query.mock.calls.find(([sql]) => sql.includes("maintenance_status = 'DORMANT'"));
-    expect(dormancy).toBeFalsy();
-    warn.mockRestore();
+    expect(Number(ledgerInsert[1][2])).toBeCloseTo(12.1483, 3); // net = gross - fee only
+    expect(ledgerInsert[0]).toContain(', 0)');
+
+    // Residual row still exists, booked at 0 USDC (coins stay in the wallet).
+    const residual = client.query.mock.calls.find(
+      ([sql, p]) => sql.includes('INSERT INTO protocol_revenue_ledger') && p && p[1] === 'UNSOLD_CAPACITY'
+    );
+    expect(residual).toBeTruthy();
+    expect(Number(residual[1][0])).toBe(0);
   });
 });
 
-// ---- distributePayout: multi-coin maintenance discount --------------------
+// ---- distributePayout: multiple users (pro-rata) ---------------------------
 
-describe('distributePayout — multi-coin discount', () => {
-  test('2 coins → 5% lower maintenance (lower ongoing cost)', async () => {
-    const client = distributionClient({ rate: 0.006, price: 0.05, coins: 2 });
-    // 25 GH/s × 1 day → maintenance 3 KAS full, 2.85 KAS with 5% off.
+describe('distributePayout — multiple renters pro-rata over real hashrate', () => {
+  test('splits by time-weighted hashrate when two users rented', async () => {
+    const now = Date.now();
+    const start = new Date(now - 24 * 3600 * 1000);
+    const client = distributionClient({ price: 0.05 });
+    client.query.mockImplementation(async (sql, params = []) => {
+      if (sql === 'BEGIN' || sql === 'COMMIT' || sql === 'ROLLBACK') return { rowCount: 1, rows: [] };
+      if (sql.includes('SELECT payout_timestamp FROM real_pool_payouts')) return { rowCount: 0, rows: [] };
+      if (sql.includes('SELECT MIN(changed_at)')) return { rowCount: 0, rows: [] };
+      if (sql.includes('INSERT INTO real_pool_payouts')) return { rowCount: 1, rows: [{ payout_id: 'payout-1' }] };
+      if (sql.includes('SELECT changed_at, hashrate') && sql.includes('real_rig_hashrate_history')) {
+        return { rowCount: 1, rows: [{ changed_at: start, hashrate: REAL_HASH }] };
+      }
+      if (sql.includes('INSERT INTO real_rig_hashrate_history')) return { rowCount: 1, rows: [] };
+      if (sql.includes('FROM rig_hashrate_history') && sql.includes('SELECT user_id, changed_at, hashrate')) {
+        return {
+          rowCount: 2,
+          rows: [
+            { user_id: 'user-1', changed_at: start, hashrate: '25.0000' },
+            { user_id: 'user-2', changed_at: start, hashrate: '75.0000' },
+          ],
+        };
+      }
+      if (sql.includes('SELECT user_id, virtual_hashrate FROM virtual_rigs')) return { rowCount: 0, rows: [] };
+      if (sql.includes('INSERT INTO user_rewards_ledger')) return { rowCount: 1, rows: [] };
+      if (sql.includes('INSERT INTO protocol_revenue_ledger')) return { rowCount: 1, rows: [] };
+      if (sql.includes('INSERT INTO maintenance_fee_ledger')) return { rowCount: 1, rows: [] };
+      if (sql.includes('UPDATE real_pool_payouts')) return { rowCount: 1, rows: [] };
+      throw new Error(`unexpected sql: ${sql}`);
+    });
+
     await distributePayout('KASPA', 100, 1000);
 
-    const ledgerInsert = client.query.mock.calls.find(([sql]) => sql.includes('INSERT INTO user_rewards_ledger'));
-    expect(Number(ledgerInsert[1][7])).toBeCloseTo(2.85, 6); // maintenance 5% off
-    expect(Number(ledgerInsert[1][2])).toBeCloseTo(92.15, 6); // net = 95 - 2.85
-
-    const maintLedger = client.query.mock.calls.find(([sql]) => sql.includes('INSERT INTO maintenance_fee_ledger'));
-    expect(Number(maintLedger[1][5])).toBeCloseTo(0.1425, 6); // 2.85 × $0.05
-  });
-
-  test('4 coins → 15% off maintenance; no discount at 0-1 coins', async () => {
-    const client4 = distributionClient({ rate: 0.006, price: 0.05, coins: 4 });
-    await distributePayout('KASPA', 100, 1000);
-    const ledger4 = client4.query.mock.calls.find(([sql]) => sql.includes('INSERT INTO user_rewards_ledger'));
-    expect(Number(ledger4[1][7])).toBeCloseTo(2.55, 6); // 3 × 0.85
-
-    const client0 = distributionClient({ rate: 0.006, price: 0.05, coins: 0 });
-    await distributePayout('KASPA', 100, 1000);
-    const ledger0 = client0.query.mock.calls.find(([sql]) => sql.includes('INSERT INTO user_rewards_ledger'));
-    expect(Number(ledger0[1][7])).toBeCloseTo(3, 6); // full maintenance
+    const inserts = client.query.mock.calls.filter(([sql]) => sql.includes('INSERT INTO user_rewards_ledger'));
+    // Real denominator 4692 hash-hours: user-1 = 600/4692 = 12.788% -> net 12.1483;
+    // user-2 = 1800/4692 = 38.363% -> net 36.4449. Sum 48.593 (the platform
+    // keeps the remaining 51.4% as residual).
+    const user1 = inserts.find(([sql, p]) => p && p[0] === 'user-1');
+    const user2 = inserts.find(([sql, p]) => p && p[0] === 'user-2');
+    expect(Number(user1[1][2])).toBeCloseTo(12.1483, 3);
+    expect(Number(user2[1][2])).toBeCloseTo(36.4449, 3);
   });
 });
 
 // ---- distributeMergedReward: DOGE side of LTC_DOGE (011) -------------------
 
 describe('distributeMergedReward — merged DOGE distribution', () => {
-  test('splits DOGE pro-rata 95/5 into calculated_reward_2, no maintenance, no dormancy', async () => {
+  test('splits DOGE by credit over real hashrate; residual stays with the platform', async () => {
     const client = distributionClient({ price: null });
     axios.get.mockRejectedValue(new Error('doge feed down')); // fee not converted, distribution still runs
     const result = await distributeMergedReward('LTC_DOGE', 1000, 100000);
 
     expect(result.payout_id).toBe('payout-1');
     expect(result.participants).toBe(1);
-
+    // 25 GH/s credit over 195.5 GH/s real = 12.788% of 1000 DOGE = 127.877
+    // gross -> 6.394 fee -> 121.484 net (calculated_reward_2).
     const ledgerInsert = client.query.mock.calls.find(([sql]) => sql.includes('INSERT INTO user_rewards_ledger'));
     expect(ledgerInsert).toBeTruthy();
     // params: [user, payout, reward_2 (net), fee, contrib, total, share]
-    expect(Number(ledgerInsert[1][2])).toBeCloseTo(950, 6); // 95% of 1000 DOGE
-    expect(Number(ledgerInsert[1][3])).toBeCloseTo(50, 6); // 5% fee
+    expect(Number(ledgerInsert[1][2])).toBeCloseTo(121.4834, 3);
+    expect(Number(ledgerInsert[1][3])).toBeCloseTo(6.3939, 3);
 
     // No maintenance fee rows (cost anchor stays on the LTC side).
     const maintRows = client.query.mock.calls.filter(([sql]) => sql.includes('INSERT INTO maintenance_fee_ledger'));
@@ -209,193 +241,88 @@ describe('distributeMergedReward — merged DOGE distribution', () => {
     expect(dormant).toBeFalsy();
   });
 
-  test('books the 5% fee in USDC when the DOGE price is available', async () => {
+  test('books the 5% fee and residual in USDC when the DOGE price is available', async () => {
     const client = distributionClient({ price: null });
     axios.get.mockResolvedValue({ data: { dogecoin: { usd: 0.1 } } });
     await distributeMergedReward('LTC_DOGE', 1000, 100000);
 
+    // First positive protocol row = the per-user 5% fee (6.394 DOGE x $0.10).
     const fee = client.query.mock.calls.find(
-      ([sql, p]) => sql.includes('INSERT INTO protocol_revenue_ledger') && p && Number(p[1]) > 0
+      ([sql, p]) => sql.includes('INSERT INTO protocol_revenue_ledger') && p && p[0] !== null && Number(p[1]) > 0
     );
     expect(fee).toBeTruthy();
-    expect(Number(fee[1][1])).toBeCloseTo(5, 6); // 50 DOGE × $0.10
-  });
-});
+    expect(Number(fee[1][1])).toBeCloseTo(0.6394, 3); // 6.394 DOGE × $0.10
 
-// ---- distributePayout: mine-at-loss opt-in (009) --------------------------
-
-describe('distributePayout — mine-at-loss opt-in (009)', () => {
-  test('OK at a loss + shortfall + sufficient USDC → stays ACTIVE, shortfall charged to balance', async () => {
-    const client = distributionClient({ rate: 0.006, price: 0.05, mineAtLoss: true, usdcBalance: '10.0000' });
-    // 25 GH/s × 1 day → maintenance 3 KAS; payout only 1 KAS → shortfall.
-    // remainingAfterFee = 0.95, deduct 0.95 → shortfallCoin = 2.05 KAS
-    // shortfallUsdc = 2.05 × $0.05 = $0.1025 → balance 10 − 0.1025 = 9.8975
-    await distributePayout('KASPA', 1, 1000);
-
-    // Explicit OK → the miner does NOT go dormant.
-    const dormancy = client.query.mock.calls.find(([sql]) => sql.includes("maintenance_status = 'DORMANT'"));
-    expect(dormancy).toBeFalsy();
-
-    // The shortfall came out of the user's USDC balance, not the platform.
-    const walletUpdate = client.query.mock.calls.find(([sql]) => sql.includes('UPDATE user_wallets SET usdc_balance'));
-    expect(walletUpdate).toBeTruthy();
-    expect(Number(walletUpdate[1][0])).toBeCloseTo(9.8975, 4);
-
-    // USDC-funded maintenance row booked with source='USDC'.
-    const usdcLedger = client.query.mock.calls.find(
-      ([sql, p]) => sql.includes('INSERT INTO maintenance_fee_ledger') && sql.includes("'USDC'")
+    // Residual (878.516 DOGE) booked at $0.10 = $87.85.
+    const residual = client.query.mock.calls.find(
+      ([sql, p]) => sql.includes('INSERT INTO protocol_revenue_ledger') && p && p[1] === 'UNSOLD_CAPACITY'
     );
-    expect(usdcLedger).toBeTruthy();
-    expect(Number(usdcLedger[1][5])).toBeCloseTo(0.1025, 6);
-  });
-
-  test('OK at a loss but balance canNOT cover shortfall → still DORMANT, no charge, never negative', async () => {
-    const client = distributionClient({ rate: 0.006, price: 0.05, mineAtLoss: true, usdcBalance: '0.0500' });
-    await distributePayout('KASPA', 1, 1000);
-
-    // shortfall $0.1025 > $0.05 balance → auto-pause protects the user.
-    const dormancy = client.query.mock.calls.find(([sql]) => sql.includes("maintenance_status = 'DORMANT'"));
-    expect(dormancy).toBeTruthy();
-
-    const walletUpdate = client.query.mock.calls.find(([sql]) => sql.includes('UPDATE user_wallets SET usdc_balance'));
-    expect(walletUpdate).toBeFalsy();
-
-    const usdcLedger = client.query.mock.calls.find(
-      ([sql, p]) => sql.includes('INSERT INTO maintenance_fee_ledger') && sql.includes("'USDC'")
-    );
-    expect(usdcLedger).toBeFalsy();
+    expect(residual).toBeTruthy();
+    expect(Number(residual[1][0])).toBeCloseTo(87.8516, 3);
   });
 });
 
-// ---- setMineAtLoss: OK-at-a-loss toggle endpoint ---------------------------
+// ---- reinvestRig: mined tokens → next rental window -----------------------
 
-describe('setMineAtLoss — OK-at-a-loss toggle', () => {
-  beforeEach(() => {
-    pool.query.mockReset();
-    pool.connect.mockReset();
-  });
-
-  test('enables mine-at-loss for the wallet pool', async () => {
-    pool.query.mockResolvedValueOnce({ rowCount: 1, rows: [{ rig_id: 'rig-1', mine_at_loss: true }] });
-    const res = makeRes();
-    await setMineAtLoss({ body: { wallet: WALLET, target_pool: 'KASPA', enabled: true } }, res);
-    expect(res.statusCode).toBeNull();
-    expect(res.body).toEqual({ success: true, rig_id: 'rig-1', mine_at_loss: true });
-  });
-
-  test('404 when the pool has no rig yet', async () => {
-    pool.query.mockResolvedValueOnce({ rowCount: 0, rows: [] });
-    const res = makeRes();
-    await setMineAtLoss({ body: { wallet: WALLET, target_pool: 'KASPA', enabled: true } }, res);
-    expect(res.statusCode).toBe(404);
-  });
-
-  test('rejects invalid wallet and unknown pool', async () => {
-    const res = makeRes();
-    await setMineAtLoss({ body: { wallet: 'nope', target_pool: 'KASPA', enabled: true } }, res);
-    expect(res.statusCode).toBe(400);
-
-    const res2 = makeRes();
-    await setMineAtLoss({ body: { wallet: WALLET, target_pool: 'DOGE', enabled: true } }, res2);
-    expect(res2.statusCode).toBe(400);
-  });
-});
-
-// ---- reinvestRig: mined tokens → next upgrade -----------------------------
-
-describe('reinvestRig — GoMiner reinvest', () => {
-  beforeEach(() => {
-    process.env.NODE_ENV = 'development';
-    delete process.env.NICEHASH_LIVE_ORDERS;
-    getLiveBtcPrice.mockResolvedValue({ price: 100000, feed: 'Kraken XBT/USDC', isUsdcPair: true, timestamp: 1 });
-    placeHashpowerOrder.mockResolvedValue({ success: true, mode: 'sandbox', orderId: 'sandbox-r1', sandbox: true });
-    pool.query.mockResolvedValue({ rowCount: 0, rows: [] }); // request_id not found
-  });
-
-  function reinvestClient({ balance = 1000 } = {}) {
+describe('reinvestRig — mined tokens fund the next rental', () => {
+  function reinvestClient({ hasRig = true, coins = 0 } = {}) {
     const client = {
       query: jest.fn(async (sql, params = []) => {
         if (sql === 'BEGIN' || sql === 'COMMIT' || sql === 'ROLLBACK') return { rowCount: 1, rows: [] };
         if (sql.includes('SELECT user_id FROM users')) return { rowCount: 1, rows: [{ user_id: 'user-1' }] };
-        if (sql.includes('SELECT wallet_id')) return { rowCount: 1, rows: [{ wallet_id: 'wallet-1', usdc_balance: balance }] };
-        if (sql.includes('SELECT level FROM virtual_rigs')) return { rowCount: 0, rows: [] };
-        if (sql.includes('SELECT l.ledger_id')) {
-          // claimPoolRewardsInTx: 2 unclaimed rows of 1.0 ZEC each
-          return { rowCount: 2, rows: [{ ledger_id: 'ledger-1', calculated_reward_1: '1.00000000' }, { ledger_id: 'ledger-2', calculated_reward_1: '1.00000000' }] };
+        if (sql.includes('SELECT wallet_id FROM user_wallets')) return { rowCount: 1, rows: [{ wallet_id: 'wallet-1' }] };
+        if (sql.includes('SELECT level FROM virtual_rigs')) {
+          return hasRig
+            ? { rowCount: 1, rows: [{ level: 2 }] }
+            : { rowCount: 0, rows: [] };
         }
-        if (sql.includes('UPDATE user_rewards_ledger')) return { rowCount: 1, rows: [] };
-        if (sql.includes('UPDATE user_wallets SET usdc_balance = usdc_balance +')) return { rowCount: 1, rows: [] };
-        if (sql.includes('SELECT rig_id')) return { rowCount: 0, rows: [] };
-        if (sql.includes('INSERT INTO hashrate_orders')) return { rowCount: 1, rows: [{ order_id: 'order-1' }] };
-        if (sql.includes('INSERT INTO protocol_revenue_ledger')) return { rowCount: 1, rows: [] };
-        if (sql.includes('INSERT INTO virtual_rigs')) return { rowCount: 1, rows: [{ rig_id: 'rig-new' }] };
-        if (sql.includes('INSERT INTO rig_hashrate_history')) return { rowCount: 1, rows: [] };
-        if (sql.includes('UPDATE user_wallets SET usdc_balance = $1')) return { rowCount: 1, rows: [] };
-        return { rowCount: 1, rows: [] };
+        if (sql.includes('SELECT COUNT(*) AS c FROM virtual_rigs')) {
+          return { rowCount: 1, rows: [{ c: String(coins) }] };
+        }
+        // claimPoolRewardsInTx: SELECT l.ledger_id, l.calculated_reward_1...
+        if (sql.includes('SELECT l.ledger_id, l.calculated_reward_1')) {
+          return { rowCount: 0, rows: [] };
+        }
+        if (sql.includes('UPDATE user_rewards_ledger') && sql.includes("status = 'CLAIMED'")) {
+          return { rowCount: 0, rows: [] };
+        }
+        if (sql.includes('INSERT INTO deposit_history')) return { rowCount: 1, rows: [] };
+        throw new Error(`unexpected reinvest sql: ${sql}`);
       }),
       release: jest.fn(),
     };
     pool.connect.mockResolvedValue(client);
-    axios.get.mockResolvedValue({ data: { zcash: { usd: 50 } } }); // $50/ZEC → 2 ZEC = $100
     return client;
   }
 
-  test('converts mined tokens to USDC, then runs the normal upgrade (sandbox order)', async () => {
-    const client = reinvestClient();
+  test('rejects invalid wallet', async () => {
     const res = makeRes();
-    await reinvestRig({ body: { wallet: WALLET, target_pool: 'ZCASH', request_id: 'reinvest-1' } }, res);
-
-    expect(res.statusCode).toBeNull(); // 200
-    expect(res.body.success).toBe(true);
-    expect(res.body.level).toBe(2);
-    expect(res.body.reinvested_usdc).toBe(100); // 2 ZEC × $50
-
-    // The mined tokens were claimed (ledger rows → CLAIMED) and the balance credited.
-    const claims = client.query.mock.calls.filter(([sql]) => sql.includes("SET status = 'CLAIMED'"));
-    expect(claims.length).toBe(2);
-    const credit = client.query.mock.calls.find(([sql]) => sql.includes('usdc_balance = usdc_balance +'));
-    expect(Number(credit[1][0])).toBe(100);
-
-    // The upgrade placed the marketplace order (sandbox) with 95% of $20 = 19 USDC → BTC.
-    expect(placeHashpowerOrder).toHaveBeenCalledTimes(1);
-    expect(placeHashpowerOrder).toHaveBeenCalledWith('ZCASH', 0.00019);
+    await reinvestRig({ body: { wallet: 'nope', target_pool: 'KASPA', request_id: 'req-1' } }, res);
+    expect(res.statusCode).toBe(400);
   });
 
-  test('rejects when there are no mined tokens to reinvest', async () => {
+  test('rejects unknown pool', async () => {
+    const res = makeRes();
+    await reinvestRig({ body: { wallet: WALLET, target_pool: 'DOGE', request_id: 'req-1' } }, res);
+    expect(res.statusCode).toBe(400);
+  });
+
+  test('no mined tokens → 400 with a clear message', async () => {
     const client = reinvestClient();
+    axios.get.mockResolvedValue({ data: { kaspa: { usd: 0.05 } } });
     client.query.mockImplementation(async (sql) => {
-      if (sql.includes('SELECT l.ledger_id')) return { rowCount: 0, rows: [] };
-      return reinvestClient().query(sql);
+      if (sql === 'BEGIN' || sql === 'COMMIT' || sql === 'ROLLBACK') return { rowCount: 1, rows: [] };
+      if (sql.includes('SELECT user_id FROM users')) return { rowCount: 1, rows: [{ user_id: 'user-1' }] };
+      if (sql.includes('SELECT wallet_id FROM user_wallets')) return { rowCount: 1, rows: [{ wallet_id: 'wallet-1' }] };
+      if (sql.includes('SELECT level FROM virtual_rigs')) return { rowCount: 1, rows: [{ level: 2 }] };
+      // No unclaimed mined tokens -> claim returns 0 -> reinvest refuses.
+      if (sql.includes('SELECT l.ledger_id, l.calculated_reward_1')) return { rowCount: 0, rows: [] };
+      if (sql.includes('SELECT COUNT(*) AS c FROM virtual_rigs')) return { rowCount: 1, rows: [{ c: '1' }] };
+      throw new Error(`unexpected sql: ${sql}`);
     });
     const res = makeRes();
-    await reinvestRig({ body: { wallet: WALLET, target_pool: 'ZCASH', request_id: 'reinvest-2' } }, res);
+    await reinvestRig({ body: { wallet: WALLET, target_pool: 'KASPA', request_id: 'req-empty' } }, res);
     expect(res.statusCode).toBe(400);
-    expect(res.body.error).toMatch(/No mined ZCASH tokens/);
-    expect(placeHashpowerOrder).not.toHaveBeenCalled();
-  });
-
-  test('duplicate request_id returns the stored order without re-claiming', async () => {
-    const stored = {
-      order_id: 'order-done', status: 'PLACED', nicehash_order_id: 'nh-9', sandbox: false,
-      usdc_cost: 20, protocol_fee_usdc: 1, btc_spent: 0.00019, btc_spot_price: 100000,
-      price_feed: 'Kraken', price_is_usdc_pair: true, failure_reason: null, request_id: 'reinvest-3',
-      level: 2, virtual_hashrate: 25,
-    };
-    pool.query.mockResolvedValueOnce({ rowCount: 1, rows: [stored] });
-    const res = makeRes();
-    await reinvestRig({ body: { wallet: WALLET, target_pool: 'ZCASH', request_id: 'reinvest-3' } }, res);
-    expect(res.body.duplicated).toBe(true);
-    expect(pool.connect).not.toHaveBeenCalled();
-    expect(placeHashpowerOrder).not.toHaveBeenCalled();
-  });
-
-  test('rejects invalid wallets and unknown pools', async () => {
-    const res = makeRes();
-    await reinvestRig({ body: { wallet: 'nope', target_pool: 'ZCASH', request_id: 'x' } }, res);
-    expect(res.statusCode).toBe(400);
-
-    const res2 = makeRes();
-    await reinvestRig({ body: { wallet: WALLET, target_pool: 'DOGE', request_id: 'x' } }, res2);
-    expect(res2.statusCode).toBe(400);
+    expect(res.body.error).toMatch(/No mined KASPA tokens/);
   });
 });

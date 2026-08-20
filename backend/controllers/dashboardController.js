@@ -1,7 +1,7 @@
 const { pool } = require('../config/db');
 const { isAdminWallet } = require('../middleware/adminAuth');
 const { getBacking } = require('../services/backingMonitor');
-const { tiersFor } = require('./upgradeController');
+const { tiersFor, sessionPrice, SESSION_HOURS } = require('./upgradeController');
 const { coinsOwnedFor, discountPctFor } = require('../services/multiCoinDiscount');
 
 /**
@@ -47,7 +47,7 @@ async function getDashboard(req, res) {
         [userId]
       );
       const rigs = await client.query(
-        'SELECT rig_id, target_pool, virtual_hashrate, level, maintenance_status, mine_at_loss FROM virtual_rigs WHERE user_id = $1',
+        'SELECT rig_id, target_pool, virtual_hashrate, level, maintenance_status, rental_expires_at FROM virtual_rigs WHERE user_id = $1',
         [userId]
       );
       const rates = await client.query('SELECT pool, usdc_per_ghs_per_day FROM pool_maintenance_rates');
@@ -55,13 +55,21 @@ async function getDashboard(req, res) {
       const pools = ['ZCASH', 'KASPA', 'LTC_DOGE', 'XMR'];
       const rigsByPool = {};
       const upgradeCostByPool = {};
+      const renewCostByPool = {};
       const maintenanceRateByPool = {};
+      // HYBRID: per-room session prices (1h/3h/6h/12h/24h at the 25 GH/s slot)
+      // and spare capacity, so the room card can render the session picker.
+      const sessionPricesByPool = {};
+      const coinsOwned = await coinsOwnedFor(client, userId);
+      const discountPct = discountPctFor(coinsOwned);
       for (const row of rates.rows) {
         maintenanceRateByPool[row.pool] = Number(row.usdc_per_ghs_per_day);
       }
+      const now = Date.now();
       for (const pool of pools) {
         const rig = rigs.rows.find(r => r.target_pool === pool);
         const level = rig ? Number(rig.level) : 1;
+        const expiresMs = rig?.rental_expires_at ? new Date(rig.rental_expires_at).getTime() : null;
         // pg returns NUMERIC as strings — coerce so the frontend can call .toFixed()
         rigsByPool[pool] = rig
           ? {
@@ -70,12 +78,23 @@ async function getDashboard(req, res) {
               virtual_hashrate: Number(rig.virtual_hashrate),
               level,
               maintenance_status: rig.maintenance_status,
-              mine_at_loss: rig.mine_at_loss === true,
+              rental_expires_at: rig.rental_expires_at ? new Date(rig.rental_expires_at).toISOString() : null,
+              rental_hours_left: expiresMs && expiresMs > now ? (expiresMs - now) / 3600000 : 0,
+              rental_active: expiresMs !== null && expiresMs > now,
             }
           : null;
-        // Per-coin next upgrade price (entry points reflect real backing cost).
+        // RENTAL model: 'upgrade' rents the NEXT tier; 'renew' re-rents the
+        // current tier for another window. Both are shown on the room card.
         const nextTier = tiersFor(pool).find((t) => t.level === level + 1);
         upgradeCostByPool[pool] = nextTier ? nextTier.cost : null;
+        const currentTier = tiersFor(pool).find((t) => t.level === level);
+        renewCostByPool[pool] = currentTier && currentTier.cost > 0 ? currentTier.cost : null;
+        // Session ladder for the 25 GH/s slot (the tier-2 unit). Multi-coin
+        // discount already applied — the card shows the discounted price.
+        sessionPricesByPool[pool] = {};
+        for (const hours of Object.keys(SESSION_HOURS).map(Number).sort((a, b) => a - b)) {
+          sessionPricesByPool[pool][hours] = sessionPrice(pool, 25, hours, discountPct);
+        }
       }
 
       const rewards = await client.query(
@@ -99,7 +118,25 @@ async function getDashboard(req, res) {
         }
       }
 
-      const coinsOwned = await coinsOwnedFor(client, userId);
+      // HYBRID spare capacity: what the room's real rigs produce MINUS all
+      // active credits (operator baseline included) = sellable inventory.
+      const spareRows = await client.query(
+        `SELECT target_pool,
+                COALESCE(SUM(virtual_hashrate) FILTER (WHERE rental_expires_at > CURRENT_TIMESTAMP), 0) AS active_ghs
+           FROM virtual_rigs
+          WHERE target_pool = ANY($1::varchar[])
+          GROUP BY target_pool`,
+        [pools]
+      );
+      const activeGhsByPool = {};
+      for (const row of spareRows.rows) activeGhsByPool[row.target_pool] = Number(row.active_ghs);
+      const backing = await getBacking();
+      const spareGhsByPool = {};
+      for (const pool of pools) {
+        const real = backing[pool]?.real_hash;
+        const active = activeGhsByPool[pool] || 0;
+        spareGhsByPool[pool] = real == null ? null : Math.max(0, Number(real) - active);
+      }
 
       return res.json({
         user_id: userId,
@@ -107,13 +144,16 @@ async function getDashboard(req, res) {
         usdc_balance: Number(wallet.rows[0]?.usdc_balance || 0),
         rigs: rigsByPool,
         upgrade_cost: upgradeCostByPool,
+        renew_cost: renewCostByPool,
         maintenance_rate: maintenanceRateByPool,
+        session_prices: sessionPricesByPool,
+        spare_ghs: spareGhsByPool,
         pending_rewards: pendingByPool,
         pending_rewards_2: pendingDogeByPool,
         multi_coin: { coins_owned: coinsOwned, discount_pct: discountPctFor(coinsOwned) },
         is_admin: isAdminWallet(walletAddress),
         // Real backing per coin (cached 60s) — what ACTUALLY mines this room.
-        backing: await getBacking(),
+        backing,
         // Never expose a missing/zero-address treasury — the zero address is a
         // burn address and players would lose real USDC sending to it.
         deposit_address: isSafeTreasury() ? process.env.PLATFORM_TREASURY_WALLET : null,

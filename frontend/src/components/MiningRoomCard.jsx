@@ -7,16 +7,33 @@ const COIN_NAMES = {
   XMR: 'XMR',
 };
 
+const RENTAL_HOURS = 72;
+
 export default function MiningRoomCard({
-  title, pool, rig, pendingReward, upgradeCost,
-  maintenanceRate, onUpgrade, onClaim, onWithdraw, onReinvest,
-  mineAtLoss, onToggleLoss, discountPct, pendingDoge, realBacking,
+  title, pool, rig, pendingReward, upgradeCost, renewCost,
+  onUpgrade, onRenew, onClaim, onWithdraw, onReinvest,
+  discountPct, pendingDoge, realBacking,
 }) {
   const [animating, setAnimating] = useState(false);
+  const [now, setNow] = useState(Date.now());
   const level = Number(rig?.level) || 1;
   const hashrate = Number(rig?.virtual_hashrate) || 0;
-  const dormant = rig?.maintenance_status === 'DORMANT';
   const backing = realBacking && realBacking.real_hash != null ? realBacking : null;
+  const rentalActive = rig?.rental_active === true;
+  const hoursLeft = rig?.rental_hours_left != null ? Number(rig.rental_hours_left) : 0;
+
+  // Live countdown while the rental window is active.
+  useEffect(() => {
+    if (!rentalActive) return undefined;
+    const t = setInterval(() => setNow(Date.now()), 60000);
+    return () => clearInterval(t);
+  }, [rentalActive]);
+
+  const fmt = (h) => {
+    const hh = Math.floor(h);
+    const mm = Math.floor((h - hh) * 60);
+    return `${hh}h ${mm}m`;
+  };
 
   const pulse = (fn) => {
     setAnimating(true);
@@ -24,20 +41,21 @@ export default function MiningRoomCard({
     setTimeout(() => setAnimating(false), 600);
   };
 
-  // GoMiner maintenance: USDC per GH/s per day × this miner's hashrate.
-  const dailyMaintenance = maintenanceRate > 0 ? maintenanceRate * hashrate : null;
+  const discountLabel = discountPct > 0 ? ` (${discountPct}% off)` : '';
+  const price = (cost) =>
+    cost != null ? `$${discountPct > 0 && cost != null ? (cost * (1 - discountPct / 100)).toFixed(2) : cost}` : null;
 
   return (
     <div className="mining-card">
       <div className="card-header">
         <h2>{title}</h2>
-        <span className={`status-pill ${dormant ? 'dormant' : hashrate > 0 ? 'active' : 'idle'}`}>
-          {dormant ? 'Dormant' : hashrate > 0 ? 'Mining' : 'Idle'}
+        <span className={`status-pill ${rentalActive ? 'active' : hashrate > 0 ? 'active' : 'idle'}`}>
+          {rentalActive ? 'RENTED' : hashrate > 0 ? 'Mining' : 'Not rented'}
         </span>
       </div>
       <div className="card-stats">
         {backing && (
-          <div className="stat" title="Real rented hashrate actually mining for this room's platform wallet right now. All players' virtual rigs share its payouts pro-rata.">
+          <div className="stat" title="Real rented hashrate actually mining for this room's platform wallet right now. All players' active rentals share its payouts pro-rata.">
             <span className="stat-label">Room's real rig (live)</span>
             <span className="stat-value accent">
               {backing.active_rentals && backing.active_rentals.length > 0
@@ -46,14 +64,25 @@ export default function MiningRoomCard({
             </span>
           </div>
         )}
-        <div className="stat" title="Your ownership basis in the game — your share of the room's real payouts is (your virtual / total virtual) × real pool earnings.">
-          <span className="stat-label">Your virtual share</span>
+        <div className="stat" title="The hashrate you rented for this window — your share of the room's real payouts is (your virtual / total virtual) × real pool earnings.">
+          <span className="stat-label">Your rented hashrate</span>
           <span className="stat-value">{Number(hashrate).toFixed(4)} GH/s</span>
         </div>
         <div className="stat">
-          <span className="stat-label">Level</span>
+          <span className="stat-label">Tier</span>
           <span className="stat-value">{level}</span>
         </div>
+        {rentalActive ? (
+          <div className="stat">
+            <span className="stat-label">Window left</span>
+            <span className="stat-value accent">{fmt(hoursLeft)}</span>
+          </div>
+        ) : (
+          <div className="stat">
+            <span className="stat-label">Window</span>
+            <span className="stat-value">{RENTAL_HOURS}h per rent</span>
+          </div>
+        )}
         <div className="stat">
           <span className="stat-label">Pending Yield</span>
           <span className="stat-value accent">{Number(pendingReward).toFixed(8)}</span>
@@ -64,54 +93,49 @@ export default function MiningRoomCard({
             <span className="stat-value accent">{Number(pendingDoge).toFixed(8)}</span>
           </div>
         )}
-        {dailyMaintenance !== null && (
-          <div className="stat">
-            <span className="stat-label">Maintenance</span>
-            <span className="stat-value">{dailyMaintenance.toFixed(4)} USDC/day</span>
-          </div>
-        )}
       </div>
-      {dormant && (
+      {!rentalActive && hashrate > 0 && (
         <div className="dormant-banner">
-          ⏸ Miner paused — payouts couldn't cover maintenance. Grow it (Upgrade / Reinvest),
-          deposit USDC, or OK mining at a loss to continue.
+          ⏳ Your rental window ended — the rig stopped mining. Renew to start a new {RENTAL_HOURS}h window.
         </div>
       )}
-      <div className="loss-toggle">
-        <label
-          className="loss-toggle-label"
-          title="When payouts can't cover maintenance, the shortfall is charged to your USDC balance instead of pausing. If your balance can't cover it, the miner still pauses — you can never go negative."
-        >
-          <input
-            type="checkbox"
-            checked={mineAtLoss === true}
-            onChange={(e) => onToggleLoss(pool, e.target.checked)}
-          />
-          ⚠ OK to mine at a loss
-        </label>
-      </div>
       <div className="card-actions">
-        <button
-          className={`btn-primary ${animating ? 'pulse' : ''}`}
-          onClick={() => pulse(() => onUpgrade(pool))}
-          disabled={level >= 5}
-          title={
-            upgradeCost
-              ? `Buy a miner for ${COIN_NAMES[pool] || pool} (level ${level + 1})${discountPct > 0 ? ` — ${discountPct}% multi-coin discount applied` : ''}`
-              : 'Max level reached'
-          }
-        >
-          {level >= 5
-            ? 'Max Level'
-            : `${rig ? 'Upgrade Rig' : 'Buy Miner'} — $${discountPct > 0 && upgradeCost != null ? (upgradeCost * (1 - discountPct / 100)).toFixed(2) : (upgradeCost ?? '—')}${discountPct > 0 ? ` (${discountPct}% off)` : ''}`}
-        </button>
+        {rentalActive || (hashrate > 0 && renewCost) ? (
+          <>
+            <button
+              className={`btn-primary ${animating ? 'pulse' : ''}`}
+              onClick={() => pulse(() => onRenew(pool))}
+              disabled={!renewCost}
+              title={renewCost ? `Rent ${COIN_NAMES[pool] || pool} hashrate for another ${RENTAL_HOURS}h${discountPct > 0 ? ` — ${discountPct}% multi-coin discount applied` : ''}` : 'Rental not renewable'}
+            >
+              {renewCost != null ? `${rentalActive ? 'Renew' : 'Rent again'} ${RENTAL_HOURS}h — ${price(renewCost)}${discountLabel}` : 'Max Level'}
+            </button>
+            <button
+              className="btn-secondary"
+              onClick={() => pulse(() => onUpgrade(pool))}
+              disabled={!upgradeCost}
+              title={upgradeCost ? `Upgrade to a bigger hashrate for ${RENTAL_HOURS}h${discountPct > 0 ? ` — ${discountPct}% multi-coin discount applied` : ''}` : 'Max tier'}
+            >
+              {upgradeCost != null ? `Upgrade — ${price(upgradeCost)}${discountLabel}` : 'Max Tier'}
+            </button>
+          </>
+        ) : (
+          <button
+            className={`btn-primary ${animating ? 'pulse' : ''}`}
+            onClick={() => pulse(() => onUpgrade(pool))}
+            disabled={!upgradeCost}
+            title={upgradeCost ? `Rent ${COIN_NAMES[pool] || pool} hashrate for ${RENTAL_HOURS}h${discountPct > 0 ? ` — ${discountPct}% multi-coin discount applied` : ''}` : 'Max tier'}
+          >
+            {upgradeCost != null ? `Rent ${RENTAL_HOURS}h — ${price(upgradeCost)}${discountLabel}` : 'Max Tier'}
+          </button>
+        )}
         <button
           className="btn-secondary"
-          disabled={pendingReward <= 0 || level >= 5 || !upgradeCost}
+          disabled={pendingReward <= 0 || (!rentalActive && !upgradeCost && !renewCost)}
           onClick={() => pulse(() => onReinvest(pool))}
-          title="Put your mined tokens into the next upgrade — no USDC deposit needed"
+          title="Put your mined tokens into the next rental window — no USDC deposit needed"
         >
-          Reinvest Yield → Upgrade
+          Reinvest Yield → Rent
         </button>
         <button className="btn-secondary" disabled={pendingReward <= 0} onClick={() => pulse(() => onClaim(pool))}>
           Claim Yield

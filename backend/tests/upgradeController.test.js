@@ -222,11 +222,12 @@ describe('upgradeRig — currency conversion + order loop', () => {
     expect(statusUpdate).toBeTruthy();
     expect(statusUpdate.params[0]).toMatch(/5191/);
 
-    // The rig must be reverted to the pre-upgrade level (level 1) so the user
-    // doesn't keep a free upgrade after a refund.
+    // The rig must not survive a failed rental: a brand-new rig (no prior
+    // tier) is DELETEd so the user doesn't keep free hashrate after a refund.
+    const rigDelete = queries.find((q) => q.sql.includes('DELETE FROM virtual_rigs'));
+    expect(rigDelete).toBeTruthy();
     const rigRevert = queries.find((q) => q.sql.includes('UPDATE virtual_rigs SET level'));
-    expect(rigRevert).toBeTruthy();
-    expect(rigRevert.params[0]).toBe(1);
+    expect(rigRevert).toBeFalsy(); // nothing to revert to — it was new
   });
 
   test('duplicate request_id returns the stored order without double-charging', async () => {
@@ -359,7 +360,7 @@ describe('upgradeRig — currency conversion + order loop', () => {
     expect(placeHashpowerOrder).toHaveBeenCalledWith('XMR', 0.0000475);
   });
 
-  test('MRR live order: books the ACTUAL rental cost and credits the buy-in as the rig maintenance fund (GoMiner 010 accounting)', async () => {
+  test('MRR live order: rental window set to ACTUAL rented hours; rig_rentals audit row recorded', async () => {
     process.env.NODE_ENV = 'production';
     process.env.MRR_LIVE_ORDERS = '1';
     process.env.MARKETPLACE_PROVIDER = 'mrr';
@@ -376,7 +377,7 @@ describe('upgradeRig — currency conversion + order loop', () => {
     });
     const { client } = makeClient({ balance: 1000, coins: 2 });
     pool.connect.mockResolvedValue(client);
-    // The GoMiner backing ledger runs AFTER the tx via module-level pool.query.
+    // The rental audit row runs AFTER the tx via module-level pool.query.
     pool.query.mockImplementation(async (sql) => {
       if (sql.includes('SELECT rig_id FROM virtual_rigs')) {
         return { rowCount: 1, rows: [{ rig_id: 'rig-1' }] };
@@ -391,15 +392,19 @@ describe('upgradeRig — currency conversion + order loop', () => {
     expect(res.body.order_status).toBe('PLACED');
     expect(mrrPlace).toHaveBeenCalledTimes(1);
 
-    // 1) The rig's initial fund: buy-in credited to the maintenance pool.
+    // 1) RENTAL model: the rig window is the ACTUAL rented hours (72h).
     const poolCalls = pool.query.mock.calls.map(([sql, params]) => ({ sql, params }));
-    const maintInsert = poolCalls.find((c) => c.sql.includes('INSERT INTO maintenance_fee_ledger'));
-    expect(maintInsert).toBeTruthy();
-    // KASPA tier 2 = $5, 2 coins -> 5% off -> $4.75; fee $0.2375; fund $4.5125.
-    expect(Number(maintInsert.params[3])).toBeCloseTo(4.5125, 2);
-    expect(maintInsert.sql).toContain("'POOL'"); // source is a SQL literal, not a param
+    const expiryUpdate = poolCalls.find((c) => c.sql.includes('rental_expires_at'));
+    expect(expiryUpdate).toBeTruthy();
+    expect(expiryUpdate.params[0] instanceof Date).toBe(true);
+    expect(res.body.rig_hours).toBe(72);
+    expect(res.body.rental_expires_at).toBeTruthy();
 
-    // 2) rig_rentals records the ACTUAL cost (not the buy-in allocation).
+    // 2) No maintenance POOL fund in the rental model — nothing booked to it.
+    const maintInsert = poolCalls.find((c) => c.sql.includes('INSERT INTO maintenance_fee_ledger'));
+    expect(maintInsert).toBeFalsy();
+
+    // 3) rig_rentals records the ACTUAL cost (audit trail of the real rental).
     const rentalInsert = poolCalls.find((c) => c.sql.includes('INSERT INTO rig_rentals'));
     expect(rentalInsert).toBeTruthy();
     expect(rentalInsert.params[3]).toBe('5699001'); // mrr_rental_id

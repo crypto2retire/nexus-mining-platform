@@ -1,7 +1,7 @@
 const axios = require('axios');
 const { pool } = require('../config/db');
-const { contributionsForPool } = require('./rigHistory');
-const { coinsOwnedFor, discountPctFor } = require('./multiCoinDiscount');
+const { contributionsForPool, logRealHashChange, realHashHoursForPool } = require('./rigHistory');
+const { fetchLiveRealHash } = require('./roomHash');
 
 const PROTOCOL_FEE_PCT = 0.05;
 
@@ -10,12 +10,20 @@ function toSatPrecision(value) {
 }
 
 /**
- * GoMiner-style maintenance: buying a miner includes its hashrate forever,
- * but each payout first pays the miner's own running cost (maintenance +
- * electricity) — deducted per GH/s per day from the pool's maintenance rate
- * table. If a payout can't cover the miner's maintenance, the miner goes
- * DORMANT (GoMiner "paused"): it stops contributing hashrate until the owner
- * grows it (upgrade) or tops up (deposit).
+ * HYBRID session model (2026-08-20, Kevin's call):
+ *
+ *   - 72h purchases rent a brand-new real MRR rig; the buyer's credit (tier
+ *     hashrate, e.g. 25 GH/s) is a slice of that rig. The rig's REMAINING
+ *     real hashrate becomes room inventory (sellable spare).
+ *   - Short sessions (1h-24h) are slices of the room's REAL running hashrate
+ *     — no new marketplace rental. Oversell guard: credit may never exceed
+ *     what the pool wallet reports.
+ *   - Every payout splits by  (credit hash-hours) / (REAL rig hash-hours).
+ *     Each holder gets exactly the coins their slice mined (95%, 5% fee).
+ *     The platform keeps the residual — the operator baseline plus unsold
+ *     capacity — booked as UNSOLD_CAPACITY in protocol_revenue_ledger.
+ *   - NO maintenance deduction, NO DORMANT, NO mine-at-loss. A rig whose
+ *     window passed contributes 0 (expiry sweeper).
  */
 
 const POOL_COINGECKO = {
@@ -41,52 +49,52 @@ async function fetchCoinUsdPrice(targetPool) {
   return price;
 }
 
-/** USDC per GH/s per day from the operator-tunable rates table (0 = unset). */
-async function maintenanceRateUsdcPerGhsDay(queryable, targetPool) {
-  const { rows } = await queryable.query(
-    'SELECT usdc_per_ghs_per_day FROM pool_maintenance_rates WHERE pool = $1',
-    [targetPool]
-  );
-  return rows.length > 0 ? Number(rows[0].usdc_per_ghs_per_day) : 0;
-}
-
-/** Whether the owner explicitly OK'd mining at a loss (009_mine_at_loss). */
-async function mineAtLossEnabled(queryable, userId, targetPool) {
-  const { rows } = await queryable.query(
-    'SELECT mine_at_loss FROM virtual_rigs WHERE user_id = $1 AND target_pool = $2',
-    [userId, targetPool]
-  );
-  return rows.length > 0 && rows[0].mine_at_loss === true;
-}
-
-/** GoMiner auto-pause: miner stops contributing until grown or topped up. */
-async function goDormant(client, userId, targetPool, net, maintenanceUsdc) {
+/**
+ * Book the platform's residual (unsold capacity + operator baseline) as
+ * platform revenue. source_user_id stays NULL — the row is platform-level,
+ * not attributable to a player. amount_usdc is 0 when no price is available
+ * (the coins physically remain in the platform wallet; the USDC booking can
+ * be backfilled later).
+ */
+async function bookUnsoldResidual(client, amountCoin, coinUsdPrice, transactionType) {
+  if (!(amountCoin > 0)) return;
+  const usdc = coinUsdPrice > 0 ? parseFloat((amountCoin * coinUsdPrice).toFixed(4)) : 0;
   await client.query(
-    `UPDATE virtual_rigs
-        SET maintenance_status = 'DORMANT', dormant_at = CURRENT_TIMESTAMP
-      WHERE user_id = $1 AND target_pool = $2`,
-    [userId, targetPool]
+    `INSERT INTO protocol_revenue_ledger (source_user_id, amount_usdc, transaction_type)
+     VALUES (NULL, $1, $2)`,
+    [usdc, transactionType]
   );
-  // Zero the contribution going forward so a dormant miner stops
-  // earning shares (and stops being charged) until resumed.
-  await client.query(
-    'INSERT INTO rig_hashrate_history (user_id, target_pool, hashrate) VALUES ($1, $2, 0)',
-    [userId, targetPool]
-  );
-  console.log(`⏸ Miner ${userId}/${targetPool} went DORMANT — payout ${net.toFixed(8)} couldn't cover maintenance ${maintenanceUsdc.toFixed(8)} USDC`);
 }
 
 /**
  * Core distribution: split a real pool payout among users proportional to
- * their time-weighted hashrate contribution during the payout period, AFTER
- * deducting each miner's own maintenance (rate × hashrate × days).
- *
- * Shared by the reward webhook (external trigger) and the payout trigger
- * (automatic pool-wallet watcher).
- *
- * @returns {Promise<{payout_id, participants, total_contribution, period_start, period_end}>}
+ * their time-weighted hashrate credit over the payout period, divided by the
+ * ROOM'S REAL hash-hours (hybrid model). The residual stays with the platform.
  */
 async function distributePayout(targetPool, totalCryptoReward1, totalNetworkHashrate) {
+  // Network I/O stays OUTSIDE the transaction (never hold row locks during it):
+  // 1) live real hashrate to refresh the denominator ledger,
+  // 2) coin price for residual booking (best-effort).
+  let realHashNow = null;
+  try {
+    let activeRentals = [];
+    if (targetPool === 'LTC_DOGE') {
+      const r = await pool.query(
+        "SELECT mrr_rental_id FROM rig_rentals WHERE target_pool = 'LTC_DOGE' AND status = 'ACTIVE'"
+      );
+      activeRentals = r.rows;
+    }
+    realHashNow = await fetchLiveRealHash(targetPool, activeRentals);
+  } catch (err) {
+    console.warn(`distribute: live real hash fetch failed for ${targetPool}: ${err.message}`);
+  }
+  let coinUsdPrice = 0;
+  try {
+    coinUsdPrice = await fetchCoinUsdPrice(targetPool);
+  } catch (err) {
+    console.warn(`distribute: price feed down for ${targetPool} — residual booked at 0 USDC: ${err.message}`);
+  }
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -118,118 +126,70 @@ async function distributePayout(targetPool, totalCryptoReward1, totalNetworkHash
     );
     const payoutId = payoutResult.rows[0].payout_id;
 
+    // Record what the room was REALLY delivering at payout time (fair-slice
+    // denominator ledger). A failed live fetch leaves the last known row.
+    if (realHashNow != null) {
+      try {
+        await logRealHashChange(client, targetPool, realHashNow);
+      } catch (logErr) {
+        console.warn(`distribute: could not log real hash for ${targetPool}: ${logErr.message}`);
+      }
+    }
+
     const contribs = await contributionsForPool(client, targetPool, periodStart, periodEnd);
     const totalContribution = contribs.reduce((sum, c) => sum + c.contribution, 0);
 
-    // Maintenance is priced in USDC but rewards are in coin — convert the fee
-    // at the live coin price. If the price feed is down we still distribute
-    // the payout (real coins must never sit) but skip the maintenance
-    // deduction for this period and log the gap for the operator.
-    const rateUsdc = await maintenanceRateUsdcPerGhsDay(client, targetPool);
-    let coinPrice = null;
-    if (rateUsdc > 0) {
-      try {
-        coinPrice = await fetchCoinUsdPrice(targetPool);
-      } catch (err) {
-        console.warn(`${targetPool}: price feed down (${err.message}) — maintenance SKIPPED for payout ${payoutId}; fee still booked`);
-      }
+    // DENOMINATOR: real hash-hours (hybrid). Fallback to virtual sum only
+    // when no real measurement exists yet (fresh rollout) — log it loudly.
+    const realHashHours = await realHashHoursForPool(client, targetPool, periodStart, periodEnd);
+    const denominator = realHashHours > 0 ? realHashHours : totalContribution;
+    if (realHashHours <= 0) {
+      console.warn(
+        `distribute: ${targetPool} has no real-hash measurements yet — falling back to virtual denominator (${totalContribution}). Install 014 + let the backing monitor run before relying on slices.`
+      );
     }
-    const periodHours = Math.max((periodEnd.getTime() - periodStart.getTime()) / 3600000, 0);
-    const periodDays = periodHours / 24;
 
+    let totalNet = 0;
     for (const c of contribs) {
-      if (totalContribution <= 0 || c.contribution <= 0) continue;
-      const sharePct = c.contribution / totalContribution;
+      if (denominator <= 0 || c.contribution <= 0) continue;
+      const sharePct = c.contribution / denominator;
       const gross = Number(totalCryptoReward1) * sharePct;
       const fee = gross * PROTOCOL_FEE_PCT;
-
-      // Average hashrate over the period = hashrate-hours / hours held.
-      const avgGhs = periodHours > 0 ? c.contribution / periodHours : 0;
-      // Multi-coin loyalty: the more coins a user mines, the lower their
-      // ongoing running cost (2/3/4 coins -> 5/10/15% off maintenance).
-      const coinsOwned = await coinsOwnedFor(client, c.user_id);
-      const maintDiscount = discountPctFor(coinsOwned);
-      const maintenanceUsdc = avgGhs * rateUsdc * periodDays * (1 - maintDiscount / 100);
-      const maintenanceCoin =
-        coinPrice && maintenanceUsdc > 0 ? maintenanceUsdc / coinPrice : 0;
-
-      // A miner that can't cover its own running cost nets zero and goes
-      // DORMANT (stops contributing until upgraded or topped up).
-      const remainingAfterFee = gross - fee;
-      const deductMaintenance = Math.min(maintenanceCoin, Math.max(remainingAfterFee, 0));
-      const net = remainingAfterFee - deductMaintenance;
-      const shortfall = maintenanceCoin > remainingAfterFee + 1e-12;
+      const net = gross - fee;
+      totalNet += net;
 
       await client.query(
         `INSERT INTO user_rewards_ledger
           (user_id, payout_id, calculated_reward_1, protocol_fee_taken, status,
            weighted_contribution, total_contribution, share_pct, maintenance_fee_1)
-         VALUES ($1, $2, $3, $4, 'UNCLAIMED', $5, $6, $7, $8)`,
-        [c.user_id, payoutId, net, fee, c.contribution, totalContribution, sharePct, deductMaintenance]
+         VALUES ($1, $2, $3, $4, 'UNCLAIMED', $5, $6, $7, 0)`,
+        [c.user_id, payoutId, net, fee, c.contribution, denominator, sharePct]
       );
       await client.query(
         'INSERT INTO protocol_revenue_ledger (source_user_id, amount_usdc, transaction_type) VALUES ($1, $2, $3)',
         [c.user_id, fee, 'MINING_REWARD_FEE']
       );
+    }
 
-      // Audit trail: exactly what was charged and for what hashrate/period.
-      if (deductMaintenance > 0) {
-        const maintenanceUsdcActual = deductMaintenance * coinPrice;
-        await client.query(
-          `INSERT INTO maintenance_fee_ledger
-            (payout_id, user_id, target_pool, hashrate_ghs, days, amount_usdc)
-           VALUES ($1, $2, $3, $4, $5, $6)`,
-          [payoutId, c.user_id, targetPool, avgGhs, periodDays, maintenanceUsdcActual]
-        );
-      }
-
-      // GoMiner pause: payout couldn't cover the miner's running cost.
-      if (shortfall && avgGhs > 0) {
-        const shortfallCoin = maintenanceCoin - deductMaintenance;
-        const shortfallUsdc = shortfallCoin * (coinPrice || 0);
-
-        // Opt-in (009): the owner explicitly OK'd mining at a loss. The
-        // shortfall is charged to their USDC balance — the platform never
-        // fronts ongoing mining costs. If the balance can't cover it, the
-        // miner still goes DORMANT: users can never be driven negative.
-        const okLoss = await mineAtLossEnabled(client, c.user_id, targetPool);
-        if (okLoss && coinPrice && shortfallUsdc > 0) {
-          const walletResult = await client.query(
-            'SELECT wallet_id, usdc_balance FROM user_wallets WHERE user_id = $1 FOR UPDATE',
-            [c.user_id]
-          );
-          const wallet = walletResult.rows[0];
-          if (wallet && Number(wallet.usdc_balance) >= shortfallUsdc) {
-            await client.query(
-              'UPDATE user_wallets SET usdc_balance = $1, updated_at = CURRENT_TIMESTAMP WHERE wallet_id = $2',
-              [toSatPrecision(Number(wallet.usdc_balance) - shortfallUsdc), wallet.wallet_id]
-            );
-            // Audit trail: the USDC-funded portion of this maintenance charge.
-            await client.query(
-              `INSERT INTO maintenance_fee_ledger
-                (payout_id, user_id, target_pool, hashrate_ghs, days, amount_usdc, source)
-               VALUES ($1, $2, $3, $4, $5, $6, 'USDC')`,
-              [payoutId, c.user_id, targetPool, avgGhs, periodDays, shortfallUsdc]
-            );
-            console.log(`⚠️ Miner ${c.user_id}/${targetPool} OK'd loss — ${shortfallUsdc.toFixed(4)} USDC shortfall charged to balance`);
-            continue;
-          }
-        }
-
-        await goDormant(client, c.user_id, targetPool, net, maintenanceUsdc);
-      }
+    // Residual = what the room produced that no holder's credit covers —
+    // the operator baseline + unsold capacity. It stays in the platform
+    // wallet; booked here as platform revenue.
+    const residualCoin = Number(totalCryptoReward1) - totalNet;
+    if (residualCoin > 0) {
+      await bookUnsoldResidual(client, residualCoin, coinUsdPrice, 'UNSOLD_CAPACITY');
     }
 
     await client.query(
       'UPDATE real_pool_payouts SET total_contribution = $1 WHERE payout_id = $2',
-      [totalContribution, payoutId]
+      [denominator, payoutId]
     );
 
     await client.query('COMMIT');
     return {
       payout_id: payoutId,
       participants: contribs.length,
-      total_contribution: totalContribution,
+      total_contribution: denominator,
+      residual_coin: toSatPrecision(residualCoin),
       period_start: periodStart.toISOString(),
       period_end: periodEnd.toISOString(),
     };
@@ -244,13 +204,28 @@ async function distributePayout(targetPool, totalCryptoReward1, totalNetworkHash
 
 /**
  * Merged mining distribution (011): F2Pool pays the DOGE side of the LTC_DOGE
- * pool separately. Pro-rata by the same time-weighted contributions, 95/5
- * split, tracked in calculated_reward_2 (DOGE units) so it never mixes with
- * the LTC amounts. No maintenance deduction (the base coin carries the cost
- * anchor) and no dormancy logic. The 5% fee physically stays at the DOGE
- * wallet; its USDC value is booked when the price feed is available.
+ * pool separately. Same hybrid math as distributePayout — pro-rata by the
+ * same time-weighted contributions over REAL hash-hours, 95/5 split, tracked
+ * in calculated_reward_2 (DOGE units) so it never mixes with the LTC amounts.
+ * The residual is booked in USDC at the live DOGE price when available.
  */
 async function distributeMergedReward(targetPool, totalCryptoReward2, totalNetworkHashrate) {
+  let realHashNow = null;
+  try {
+    const r = await pool.query(
+      "SELECT mrr_rental_id FROM rig_rentals WHERE target_pool = 'LTC_DOGE' AND status = 'ACTIVE'"
+    );
+    realHashNow = await fetchLiveRealHash('LTC_DOGE', r.rows);
+  } catch (err) {
+    console.warn(`distributeMerged: live real hash fetch failed: ${err.message}`);
+  }
+  let dogePrice = null;
+  try {
+    dogePrice = await fetchCoinUsdPrice('LTC_DOGE_DOGE');
+  } catch (err) {
+    console.warn(`LTC_DOGE: DOGE price feed down (${err.message}) — fee/residual not converted for this payout`);
+  }
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -282,31 +257,39 @@ async function distributeMergedReward(targetPool, totalCryptoReward2, totalNetwo
     );
     const payoutId = payoutResult.rows[0].payout_id;
 
-    const contribs = await contributionsForPool(client, targetPool, periodStart, periodEnd);
-    const totalContribution = contribs.reduce((sum, c) => sum + c.contribution, 0);
-
-    // Book the 5% fee in USDC at the live DOGE price when available; a price
-    // outage never blocks distributing real coins.
-    let dogePrice = null;
-    try {
-      dogePrice = await fetchCoinUsdPrice('LTC_DOGE_DOGE');
-    } catch (err) {
-      console.warn(`LTC_DOGE: DOGE price feed down (${err.message}) — fee not converted for payout ${payoutId}`);
+    if (realHashNow != null) {
+      try {
+        await logRealHashChange(client, 'LTC_DOGE', realHashNow);
+      } catch (logErr) {
+        console.warn(`distributeMerged: could not log real hash: ${logErr.message}`);
+      }
     }
 
+    const contribs = await contributionsForPool(client, targetPool, periodStart, periodEnd);
+    const totalContribution = contribs.reduce((sum, c) => sum + c.contribution, 0);
+    const realHashHours = await realHashHoursForPool(client, 'LTC_DOGE', periodStart, periodEnd);
+    const denominator = realHashHours > 0 ? realHashHours : totalContribution;
+    if (realHashHours <= 0) {
+      console.warn(
+        `distributeMerged: ${targetPool} has no real-hash measurements yet — falling back to virtual denominator (${totalContribution}).`
+      );
+    }
+
+    let totalNet = 0;
     for (const c of contribs) {
-      if (totalContribution <= 0 || c.contribution <= 0) continue;
-      const sharePct = c.contribution / totalContribution;
+      if (denominator <= 0 || c.contribution <= 0) continue;
+      const sharePct = c.contribution / denominator;
       const gross = Number(totalCryptoReward2) * sharePct;
       const fee = gross * PROTOCOL_FEE_PCT;
       const net = gross - fee;
+      totalNet += net;
 
       await client.query(
         `INSERT INTO user_rewards_ledger
           (user_id, payout_id, calculated_reward_1, calculated_reward_2, protocol_fee_taken, status,
            weighted_contribution, total_contribution, share_pct)
          VALUES ($1, $2, 0, $3, $4, 'UNCLAIMED', $5, $6, $7)`,
-        [c.user_id, payoutId, net, fee, c.contribution, totalContribution, sharePct]
+        [c.user_id, payoutId, net, fee, c.contribution, denominator, sharePct]
       );
 
       if (dogePrice && fee > 0) {
@@ -317,16 +300,22 @@ async function distributeMergedReward(targetPool, totalCryptoReward2, totalNetwo
       }
     }
 
+    const residualCoin = Number(totalCryptoReward2) - totalNet;
+    if (residualCoin > 0) {
+      await bookUnsoldResidual(client, residualCoin, dogePrice || 0, 'UNSOLD_CAPACITY');
+    }
+
     await client.query(
       'UPDATE real_pool_payouts SET total_contribution = $1 WHERE payout_id = $2',
-      [totalContribution, payoutId]
+      [denominator, payoutId]
     );
 
     await client.query('COMMIT');
     return {
       payout_id: payoutId,
       participants: contribs.length,
-      total_contribution: totalContribution,
+      total_contribution: denominator,
+      residual_coin: toSatPrecision(residualCoin),
       period_start: periodStart.toISOString(),
       period_end: periodEnd.toISOString(),
     };

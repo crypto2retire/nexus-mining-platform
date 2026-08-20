@@ -1,6 +1,6 @@
 const express = require('express');
 const { getDashboard } = require('../controllers/dashboardController');
-const { upgradeRig, reinvestRig, setMineAtLoss } = require('../controllers/upgradeController');
+const { upgradeRig, reinvestRig, buySession } = require('../controllers/upgradeController');
 const { handleRewardWebhook } = require('../services/rewardDistributor');
 const { getRewards, claimRewards, withdrawRewards, listWithdrawals, markWithdrawalPaid, rejectWithdrawal } = require('../controllers/rewardsController');
 const { getAdminStats } = require('../controllers/adminStatsController');
@@ -10,9 +10,9 @@ const router = express.Router();
 
 router.get('/dashboard', getDashboard);
 router.post('/rigs/upgrade', upgradeRig);
+// HYBRID: short hashrate sessions drawn from the room's spare capacity.
+router.post('/rigs/session', buySession);
 router.post('/rigs/reinvest', reinvestRig);
-// GoMiner opt-in: OK mining at a loss (shortfall charged to USDC balance).
-router.post('/rigs/mine-at-loss', setMineAtLoss);
 router.post('/rewards/webhook', handleRewardWebhook);
 // Payout ledger + claim/withdraw (time-weighted contributions per payout).
 router.get('/rewards', getRewards);

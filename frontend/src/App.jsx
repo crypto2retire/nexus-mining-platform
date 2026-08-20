@@ -91,7 +91,9 @@ export default function App() {
     await fetchDashboard(normalized);
   };
 
-  const upgrade = async (pool) => {
+  // RENT: pay USDC (or reinvested tokens) to rent hashrate for a 72h window.
+  // `renew=true` re-rents the current tier; otherwise rents the next tier.
+  const rent = async (pool, { renew = false } = {}) => {
     try {
       setError('');
       // Idempotency key: prevents double-click / network retry from placing two orders.
@@ -101,25 +103,32 @@ export default function App() {
       const res = await fetch(`${API_BASE}/api/rigs/upgrade`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ wallet, target_pool: pool, request_id: requestId }),
+        body: JSON.stringify({ wallet, target_pool: pool, request_id: requestId, renew }),
       });
       const result = await res.json();
-      if (!res.ok) throw new Error(result.error || 'Upgrade failed');
+      if (!res.ok) throw new Error(result.error || 'Rent failed');
 
       const sandboxTag = result.sandbox ? ' [SANDBOX]' : '';
       const marketplaceTag = result.marketplace ? `\nMarketplace: ${result.marketplace}` : '';
       const summary = result.btc_spent
         ? `\n\nBTC spent: ${result.btc_spent}\nOrder ID: ${result.nicehash_order_id || 'n/a'}\nStatus: ${result.order_status || 'n/a'}${marketplaceTag}${sandboxTag}`
         : '';
-      alert(`🎉 Upgrade successful! ${result.level} → hashrate ${result.hashrate} GH/s${summary}`);
+      const expires = result.rental_expires_at
+        ? `\nRental window: ${result.rig_hours}h (until ${new Date(result.rental_expires_at).toLocaleString()})`
+        : '';
+      alert(
+        renew
+          ? `🔄 Rental renewed! ${result.level} tier → ${result.hashrate} GH/s for ${result.rig_hours || 72}h${expires}${summary}`
+          : `🎉 Rented! ${result.level} tier → ${result.hashrate} GH/s for ${result.rig_hours || 72}h${expires}${summary}`
+      );
       await fetchDashboard();
     } catch (err) {
       setError(err.message);
     }
   };
 
-  // GoMiner reinvest: mined tokens fund the next upgrade directly — no USDC
-  // deposit step. Same idempotent upgrade path behind the scenes.
+  // Reinvest: mined tokens fund the next rental window directly — no USDC
+  // deposit step. Same idempotent rent path behind the scenes.
   const reinvest = async (pool) => {
     try {
       setError('');
@@ -141,27 +150,8 @@ export default function App() {
         : '';
       alert(
         `🔄 Reinvested ${Number(result.reinvested_usdc || 0).toFixed(2)} USDC of mined tokens — ` +
-        `rig upgraded to level ${result.level} (${result.hashrate} GH/s)${summary}`
+        `rented tier ${result.level} (${result.hashrate} GH/s) for ${result.rig_hours || 72}h${summary}`
       );
-      await fetchDashboard();
-    } catch (err) {
-      setError(err.message);
-    }
-  };
-
-  // GoMiner opt-in: user OKs mining at a loss. The maintenance shortfall is
-  // charged to their USDC balance instead of pausing (auto-pause still guards
-  // them if the balance can't cover it).
-  const toggleLoss = async (pool, enabled) => {
-    try {
-      setError('');
-      const res = await fetch(`${API_BASE}/api/rigs/mine-at-loss`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ wallet, target_pool: pool, enabled }),
-      });
-      const result = await res.json();
-      if (!res.ok) throw new Error(result.error || 'Failed to update');
       await fetchDashboard();
     } catch (err) {
       setError(err.message);
@@ -312,13 +302,12 @@ export default function App() {
                   rig={data.rigs[pool.key]}
                   pendingReward={animated[pool.key] || data.pending_rewards[pool.key] || 0}
                   upgradeCost={data.upgrade_cost?.[pool.key] ?? null}
-                  maintenanceRate={data.maintenance_rate?.[pool.key] ?? 0}
-                  onUpgrade={upgrade}
+                  renewCost={data.renew_cost?.[pool.key] ?? null}
+                  onUpgrade={() => rent(pool.key)}
+                  onRenew={() => rent(pool.key, { renew: true })}
                   onClaim={claim}
                   onWithdraw={withdraw}
                   onReinvest={reinvest}
-                  mineAtLoss={data.rigs[pool.key]?.mine_at_loss === true}
-                  onToggleLoss={toggleLoss}
                   discountPct={data.multi_coin?.discount_pct ?? 0}
                   pendingDoge={data.pending_rewards_2?.[pool.key] ?? 0}
                   realBacking={data.backing?.[pool.key] ?? null}

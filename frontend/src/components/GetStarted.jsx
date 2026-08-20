@@ -18,8 +18,9 @@ export default function GetStarted({ depositAddress }) {
         <div className="get-started-card">
           <h3>How to start mining with Nexus</h3>
           <p className="get-started-intro">
-            Nexus pays out a share of <strong>real</strong> mining rewards (Zcash, Kaspa, Litecoin/
-            Dogecoin) based on the hashrate you own. Here's how to set up your account:
+            Nexus rents <strong>real</strong> mining hashrate (Zcash, Kaspa, Litecoin/Dogecoin,
+            Monero) and pays you a pro-rata share of what it mines while your rental is active.
+            Here's how to set up your account:
           </p>
 
           <ol className="get-started-steps">
@@ -38,7 +39,7 @@ export default function GetStarted({ depositAddress }) {
               box above and click <strong>Connect Wallet</strong>. Your address is your account.
             </li>
             <li>
-              <strong>Fund with USDC on the Base network.</strong> Upgrades are paid in USDC. Send
+              <strong>Fund with USDC on the Base network.</strong> Rentals are paid in USDC. Send
               USDC on the <strong>Base</strong> network (not Ethereum mainnet) to the platform
               deposit address:
               <div className="deposit-address" title="Platform USDC deposit address">
@@ -47,21 +48,23 @@ export default function GetStarted({ depositAddress }) {
               Your balance appears on the dashboard within a minute of the transfer.
             </li>
             <li>
-              <strong>Buy a miner.</strong> Click <strong>Upgrade Rig</strong> on any room card. You
-              own the miner and its hashrate permanently. Entry prices follow real mining costs —
-              Kaspa and Monero start at <strong>$5</strong>, Zcash at <strong>$20</strong>,
-              Litecoin at <strong>$50</strong>.
+              <strong>Rent hashrate.</strong> Click <strong>Rent 72h</strong> on any room card.
+              Your payment rents a <strong>real</strong> mining rig for 72 hours — you never buy
+              anything, you just rent mining time, exactly like renting a server. Entry prices
+              follow real rental costs — Kaspa and Monero start at <strong>$5</strong>, Zcash at{' '}
+              <strong>$20</strong>, Litecoin at <strong>$50</strong>.
             </li>
             <li>
-              <strong>Earn — after maintenance.</strong> Like a real miner, your rig pays its own
-              running cost (electricity + upkeep, a small USDC fee per GH/s per day) out of every
-              payout. The rest is your yield. If a payout can't cover the miner's upkeep it goes
-              dormant until you grow it or deposit — so bigger miners earn faster.
+              <strong>Earn while your rental runs.</strong> Every pool payout is split pro-rata
+              among everyone with an active rental in that room, minus a 5% platform fee. When
+              your 72h window ends, the rig stops mining — just <strong>Renew</strong> to keep
+              going. No hidden costs, no maintenance fees, no surprise pauses.
             </li>
             <li>
-              <strong>Reinvest to grow.</strong> Use the <strong>Reinvest Yield → Upgrade</strong>{' '}
-              button to put your mined tokens straight into the next upgrade — no new USDC needed.
-              Claim anytime with <strong>Claim Yield</strong>, or withdraw the mined token itself.
+              <strong>Reinvest to grow.</strong> Use the <strong>Reinvest Yield → Rent</strong>{' '}
+              button to put your mined tokens straight into the next rental window — no new USDC
+              needed. Claim anytime with <strong>Claim Yield</strong>, or withdraw the mined token
+              itself.
             </li>
           </ol>
 

@@ -1,7 +1,8 @@
 const axios = require('axios');
 const { pool } = require('../config/db');
 const { WATCHES } = require('./payoutTrigger');
-const { getOrderStatus } = require('./mrrRenter');
+const { logRealHashChange } = require('./rigHistory');
+const { fetchLiveRealHash } = require('./roomHash');
 
 /**
  * Real Backing monitor (Phase 2, 2026-08-19) — shows the OPERATOR (and users)
@@ -48,44 +49,9 @@ async function fetchPoolAccount(pool) {
   }
 }
 
-/** MRR live average for an active rental, converted to the pool's GH/s. */
-async function rentalRealGhs(mrrRentalId) {
-  try {
-    const s = await getOrderStatus(String(mrrRentalId));
-    const avg = s?.data?.hashrate?.average;
-    if (!avg) return 0;
-    // MRR average.hash is in the algo's natural unit (kheavyhash=TH, scrypt=GH,
-    // zhash=KH). Normalize to GH/s.
-    const mult = { kh: 1e-3, mh: 1, gh: 1, th: 1e3 }[String(avg.type || '').toLowerCase()];
-    if (mult === undefined) return 0;
-    return Number(avg.hash || 0) * mult;
-  } catch {
-    return 0;
-  }
-}
-
-async function liveRealHash(pool, activeRentals) {
-  if (pool === 'LTC_DOGE') {
-    // F2Pool can't look up bech32 workers — use the rented rigs' live average.
-    let total = 0;
-    for (const r of activeRentals) {
-      if (r.mrr_rental_id) total += await rentalRealGhs(r.mrr_rental_id);
-    }
-    return total;
-  }
-  if (pool === 'XMR') {
-    // herominers stats_address exposes hashrate_24h (H/s) — the honest
-    // "hashrate that actually landed" for the platform XMR wallet.
-    const data = await fetchPoolAccount(pool);
-    const h = data?.stats?.hashrate_24h ?? data?.hashrate_24h;
-    if (h == null) return null;
-    return Number(h);
-  }
-  // ZEC / KAS: the pool wallet API reports the ACTUAL landing hashrate.
-  const data = await fetchPoolAccount(pool);
-  if (!data || data.currentHashrate == null) return null;
-  const h = Number(data.currentHashrate);
-  return pool === 'ZCASH' ? h / 1e3 : h / 1e9; // H/s -> KH/s | GH/s
+/** Live real hashrate for a room in its display unit (delegates to roomHash). */
+function liveRealHash(pool, activeRentals) {
+  return fetchLiveRealHash(pool, activeRentals);
 }
 
 async function buildBacking() {
@@ -128,6 +94,17 @@ async function buildBacking() {
           ? rawUnpaid / 1e8
           : rawUnpaid;
     const realHash = await liveRealHash(poolName, rentals);
+    // HYBRID model: every backing refresh records what the room ACTUALLY
+    // delivered — this is the fair-slice payout denominator and the spare
+    // capacity ledger. A failed live fetch (null) is never logged: the last
+    // known measurement stays authoritative.
+    if (realHash != null) {
+      try {
+        await logRealHashChange(pool, poolName, realHash, REAL_UNITS[poolName]);
+      } catch (logErr) {
+        console.warn(`backing: could not log real hash for ${poolName}: ${logErr.message}`);
+      }
+    }
     out[poolName] = {
       virtual_ghs: v ? Number(v.vghs) : 0,
       rigs_sold: v ? Number(v.rigs) : 0,
@@ -156,4 +133,4 @@ async function getBacking({ force = false } = {}) {
   return cache;
 }
 
-module.exports = { getBacking, buildBacking, TTL_MS, POOLS, REAL_UNITS };
+module.exports = { getBacking, buildBacking, liveRealHash, TTL_MS, POOLS, REAL_UNITS };
