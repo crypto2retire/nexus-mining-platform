@@ -12,13 +12,14 @@ const { coinsOwnedFor, discountPctFor, DISCOUNT_LADDER } = require('../services/
 afterEach(() => jest.clearAllMocks());
 
 describe('coinsOwnedFor', () => {
-  test('counts rig rows for the user', async () => {
-    const queryable = { query: jest.fn().mockResolvedValue({ rows: [{ c: '3' }] }) };
-    await expect(coinsOwnedFor(queryable, 'user-1')).resolves.toBe(3);
-    expect(queryable.query).toHaveBeenCalledWith(
-      expect.stringContaining('SELECT COUNT(*)'),
-      ['user-1']
-    );
+  test('counts ACTIVE rig rows only — expired windows excluded (Kevin 2026-08-20)', async () => {
+    const queryable = { query: jest.fn().mockResolvedValue({ rows: [{ c: '1' }] }) };
+    await expect(coinsOwnedFor(queryable, 'user-1')).resolves.toBe(1);
+    // The SQL must filter to live rental windows — an expired rig (0 GH/s)
+    // must NOT keep the multi-coin discount.
+    const sql = queryable.query.mock.calls[0][0];
+    expect(sql).toContain('rental_expires_at > CURRENT_TIMESTAMP');
+    expect(sql).toContain('target_pool IN');
   });
 
   test('zero when no rows (defensive — also covers test mocks that return empty)', async () => {
