@@ -123,8 +123,8 @@ export default function App() {
         : '';
       alert(
         renew
-          ? `🔄 Rental renewed! ${result.level} tier → ${result.hashrate} GH/s for ${result.rig_hours || 72}h${expires}${summary}`
-          : `🎉 Rented! ${result.level} tier → ${result.hashrate} GH/s for ${result.rig_hours || 72}h${expires}${summary}`
+          ? `🔄 Rental renewed! ${result.level} tier → ${result.hashrate} ${result.unit || 'GH/s'} for ${result.rig_hours || 72}h${expires}${summary}`
+          : `🎉 Rented! ${result.level} tier → ${result.hashrate} ${result.unit || 'GH/s'} for ${result.rig_hours || 72}h${expires}${summary}`
       );
       await fetchDashboard();
     } catch (err) {
@@ -132,9 +132,11 @@ export default function App() {
     }
   };
 
-  // BUY SESSION: a short hashrate slice (1h-24h, 25 GH/s slot) drawn from the
+  // BUY SESSION: a short hashrate slice (1h-24h, the pool's tier-2 slot in its
+  // REAL unit — ZEC/XMR 10 KH/s, KAS 25 GH/s, LTC 5 GH/s) drawn from the
   // room's SPARE real capacity — no new marketplace rental, the rig is already
   // running. Higher markup = shorter session. Idempotent like rent.
+  const SESSION_SLOT = { ZCASH: 10, KASPA: 25, LTC_DOGE: 5, XMR: 10 };
   const buySession = async (pool, hours) => {
     try {
       setError('');
@@ -144,14 +146,14 @@ export default function App() {
       const res = await fetch(`${API_BASE}/api/rigs/session`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ wallet, target_pool: pool, request_id: requestId, hours, ghs: 25 }),
+        body: JSON.stringify({ wallet, target_pool: pool, request_id: requestId, hours, ghs: SESSION_SLOT[pool] || 25 }),
       });
       const result = await res.json();
       if (!res.ok) throw new Error(result.error || 'Session purchase failed');
       alert(
-        `⏱ Session rented! ${result.ghs} GH/s for ${result.hours}h — $${Number(result.price).toFixed(2)}\n` +
+        `⏱ Session rented! ${result.ghs} ${result.unit || 'GH/s'} for ${result.hours}h — $${Number(result.price).toFixed(2)}\n` +
           `Window: until ${new Date(result.rental_expires_at).toLocaleString()}\n` +
-          `Room spare left: ${Number(result.room_spare_ghs ?? 0).toFixed(1)} GH/s`
+          `Room spare left: ${Number(result.room_spare_ghs ?? 0).toFixed(1)} ${result.unit || 'GH/s'}`
       );
       await fetchDashboard();
     } catch (err) {
@@ -182,7 +184,7 @@ export default function App() {
         : '';
       alert(
         `🔄 Reinvested ${Number(result.reinvested_usdc || 0).toFixed(2)} USDC of mined tokens — ` +
-        `rented tier ${result.level} (${result.hashrate} GH/s) for ${result.rig_hours || 72}h${summary}`
+        `rented tier ${result.level} (${result.hashrate} ${result.unit || 'GH/s'}) for ${result.rig_hours || 72}h${summary}`
       );
       await fetchDashboard();
     } catch (err) {
@@ -245,7 +247,13 @@ export default function App() {
 
   const totalHashrate = useMemo(() => {
     if (!data) return 0;
-    return POOLS.reduce((sum, p) => sum + (Number(data.rigs[p.key]?.virtual_hashrate) || 0), 0);
+    // Virtual credits are per-coin units (ZEC/XMR KH/s, KAS/LTC GH/s) —
+    // normalize to GH/s before summing so the header is honest.
+    return POOLS.reduce((sum, p) => {
+      const h = Number(data.rigs[p.key]?.virtual_hashrate) || 0;
+      const unit = { ZCASH: 'KH/s', KASPA: 'GH/s', LTC_DOGE: 'GH/s', XMR: 'KH/s' }[p.key];
+      return sum + (unit === 'KH/s' ? h / 1e3 : h);
+    }, 0);
   }, [data]);
 
   const pendingTotal = useMemo(() => {

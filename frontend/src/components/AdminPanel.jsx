@@ -11,6 +11,9 @@ const POOL_LABELS = {
 
 const POOL_KEYS = ['ZCASH', 'KASPA', 'LTC_DOGE', 'XMR'];
 
+// Per-coin hashrate unit (2026-08-20): credits are in each room's REAL unit.
+const POOL_UNITS = { ZCASH: 'KH/s', KASPA: 'GH/s', LTC_DOGE: 'GH/s', XMR: 'KH/s' };
+
 /**
  * Operator-only panel. Rendered only when the connected wallet is on the
  * ADMIN_WALLETS allow-list (backend sets is_admin on the dashboard payload).
@@ -160,7 +163,7 @@ export default function AdminPanel({ wallet, refreshKey = 0 }) {
                     return (
                       <tr key={key}>
                         <td>{POOL_LABELS[key] || key}</td>
-                        <td>{cap ? Number(cap.total_hashrate).toFixed(2) : '0.00'} GH/s</td>
+                        <td>{cap ? Number(cap.total_hashrate).toFixed(2) : '0.00'} {POOL_UNITS[key] || 'GH/s'}</td>
                         <td>{cap?.rig_count ?? 0}</td>
                         <td>{pay ? Number(pay.total_crypto).toFixed(6) : '0.000000'}</td>
                         <td>{led ? Number(led.total_earned_crypto).toFixed(6) : '0.000000'}</td>
@@ -209,7 +212,7 @@ export default function AdminPanel({ wallet, refreshKey = 0 }) {
                     return (
                       <tr key={key}>
                         <td>{POOL_LABELS[key] || key}</td>
-                        <td>{Number(b.virtual_ghs).toFixed(2)} GH/s</td>
+                        <td>{Number(b.virtual_ghs).toFixed(2)} {POOL_UNITS[key] || 'GH/s'}</td>
                         <td>{b.rigs_sold}</td>
                         <td title={rentals.map((r) => `${r.rig_name} (rpi ${r.rig_rpi}, ${r.length_hours}h)`).join('\n')}>
                           {rentals.length > 0 ? rentals.map((r) => `#${r.mrr_rental_id}`).join(', ') : 'none'}

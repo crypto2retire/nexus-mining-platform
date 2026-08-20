@@ -90,11 +90,14 @@ async function getDashboard(req, res) {
         upgradeCostByPool[pool] = nextTier ? nextTier.cost : null;
         const currentTier = tiersFor(pool).find((t) => t.level === level);
         renewCostByPool[pool] = currentTier && currentTier.cost > 0 ? currentTier.cost : null;
-        // Session ladder for the 25 GH/s slot (the tier-2 unit). Multi-coin
-        // discount already applied — the card shows the discounted price.
+        // Session ladder for the tier-2 SLOT (each pool's real unit — ZEC/XMR
+        // KH/s, KAS/LTC GH/s). Multi-coin discount already applied — the card
+        // shows the discounted price. Session slot = tier 2 hashrate so a
+        // session is one unit of what the room really delivers.
         sessionPricesByPool[pool] = {};
+        const sessionSlot = tiersFor(pool).find((t) => t.level === 2)?.hashrate || 25;
         for (const hours of Object.keys(SESSION_HOURS).map(Number).sort((a, b) => a - b)) {
-          sessionPricesByPool[pool][hours] = sessionPrice(pool, 25, hours, discountPct);
+          sessionPricesByPool[pool][hours] = sessionPrice(pool, sessionSlot, hours, discountPct);
         }
       }
 
@@ -121,6 +124,8 @@ async function getDashboard(req, res) {
 
       // HYBRID spare capacity: what the room's real rigs produce MINUS all
       // active credits (operator baseline included) = sellable inventory.
+      // Credits are denominated in each pool's REAL unit (ZEC/XMR KH/s,
+      // KAS/LTC GH/s) — convert both sides to GH/s before subtracting.
       const spareRows = await client.query(
         `SELECT target_pool,
                 COALESCE(SUM(virtual_hashrate) FILTER (WHERE rental_expires_at > CURRENT_TIMESTAMP), 0) AS active_ghs
@@ -130,7 +135,12 @@ async function getDashboard(req, res) {
         [pools]
       );
       const activeGhsByPool = {};
-      for (const row of spareRows.rows) activeGhsByPool[row.target_pool] = Number(row.active_ghs);
+      for (const row of spareRows.rows) {
+        // KH/s credits are 1000x smaller than GH/s — convert to GH/s.
+        const unit = { ZCASH: 'KH/s', XMR: 'KH/s' }[row.target_pool] || 'GH/s';
+        activeGhsByPool[row.target_pool] =
+          unit === 'KH/s' ? Number(row.active_ghs) / 1e3 : Number(row.active_ghs);
+      }
       const backing = await getBacking();
       const spareGhsByPool = {};
       for (const pool of pools) {

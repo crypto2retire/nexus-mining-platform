@@ -7,6 +7,13 @@ const COIN_NAMES = {
   XMR: 'XMR',
 };
 
+// Per-coin hashrate unit matching the REAL rigs (2026-08-20): ZEC/XMR rigs are
+// KH/s-scale, KAS/LTC are GH/s-scale. The game no longer sells "25 GH/s of
+// everything" — credits are denominated in the room's real unit.
+const POOL_UNITS = { ZCASH: 'KH/s', KASPA: 'GH/s', LTC_DOGE: 'GH/s', XMR: 'KH/s' };
+// Session slot = tier-2 hashrate in the pool's unit (one unit of the room).
+const SESSION_SLOT = { ZCASH: 10, KASPA: 25, LTC_DOGE: 5, XMR: 10 };
+
 const RENTAL_HOURS = 72;
 
 export default function MiningRoomCard({
@@ -39,9 +46,11 @@ export default function MiningRoomCard({
 
   // Session picker: spare_ghs arrives ALREADY in GH/s (backend converts the
   // pool's display unit — KH/s/H/s — to GH/s before subtracting credits).
-  // The 25 GH/s slot compares directly; no re-normalization here.
+  // The per-coin session slot (tier-2 hashrate) is also converted to GH/s so
+  // the comparison works across units (ZEC/XMR slot 10 KH/s = 0.01 GH/s).
   const spareGhsNorm = spareGhs == null ? null : Number(spareGhs);
-  const canSell = spareGhsNorm != null && spareGhsNorm >= 25;
+  const slotGhs = (SESSION_SLOT[pool] || 25) * (POOL_UNITS[pool] === 'KH/s' ? 1e-3 : 1);
+  const canSell = spareGhsNorm != null && spareGhsNorm >= slotGhs;
 
   // Live countdown while the rental window is active.
   useEffect(() => {
@@ -108,7 +117,7 @@ export default function MiningRoomCard({
         )}
         <div className="stat" title="The hashrate you rented for this window — your share of the room's real payouts is (your virtual / total virtual) × real pool earnings.">
           <span className="stat-label">Your rented hashrate</span>
-          <span className="stat-value">{Number(hashrate).toFixed(4)} GH/s</span>
+          <span className="stat-value">{Number(hashrate).toFixed(4)} {POOL_UNITS[pool] || 'GH/s'}</span>
         </div>
         <div className="stat">
           <span className="stat-label">Tier</span>
@@ -194,10 +203,10 @@ export default function MiningRoomCard({
       {sessionPrices && (
         <div className="session-picker">
           <div className="session-picker-head">
-            <span className="session-picker-title">⚡ Short sessions — 25 GH/s slice</span>
+            <span className="session-picker-title">⚡ Short sessions — {SESSION_SLOT[pool] || 25} {POOL_UNITS[pool] || 'GH/s'} slice</span>
             {spareGhs != null && (
               <span className={`session-spare ${canSell ? '' : 'session-spare-low'}`}>
-                Spare: {spareGhs >= 100 ? spareGhs.toFixed(0) : spareGhs.toFixed(1)} GH/s
+                Spare: {spareGhs >= 100 ? spareGhs.toFixed(0) : spareGhs.toFixed(1)} {POOL_UNITS[pool] || 'GH/s'}
               </span>
             )}
           </div>
@@ -213,7 +222,7 @@ export default function MiningRoomCard({
                     disabled={price == null}
                     onClick={() => pulse(() => onBuySession(hours))}
                     title={
-                      `25 GH/s for ${hours}h — a slice of the room's REAL running hashrate. No new rental, so shorter sessions cost more per hour.${discountPct > 0 ? ` ${discountPct}% multi-coin discount applied` : ''}`
+                      `${SESSION_SLOT[pool] || 25} ${POOL_UNITS[pool] || 'GH/s'} for ${hours}h — a slice of the room's REAL running hashrate. No new rental, so shorter sessions cost more per hour.${discountPct > 0 ? ` ${discountPct}% multi-coin discount applied` : ''}`
                     }
                   >
                     {hours}h — {sessionPrice != null ? `$${sessionPrice.toFixed(2)}` : '—'}
@@ -222,7 +231,7 @@ export default function MiningRoomCard({
             </div>
           ) : (
             <div className="session-picker-note session-picker-note-low">
-              No sellable spare capacity — the room needs 25 GH/s of free real hashrate for a session.
+              No sellable spare capacity — the room needs {SESSION_SLOT[pool] || 25} {POOL_UNITS[pool] || 'GH/s'} of free real hashrate for a session.
             </div>
           )}
           <div className="session-picker-note">

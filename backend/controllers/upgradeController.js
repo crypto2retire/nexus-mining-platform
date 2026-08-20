@@ -32,8 +32,23 @@ function getRenter() {
  *   KASPA/XMR (cheap to back):  $5 / $10 / $25 / $50
  *   ZCASH (mid):                 $20 / $40 / $100 / $200
  *   LTC_DOGE (expensive rigs):   $50 / $120 / $300 / $750
+ *
+ * UNITS (2026-08-20, Kevin: "it is renting 25 GH/s for all tokens, yet most
+ * of our miners are not producing that much"): tier hashrates are now in each
+ * pool's REAL unit so credit can never exceed the real rig —
+ *   ZCASH KH/s, KASPA GH/s, LTC_DOGE GH/s, XMR KH/s
+ * Prices unchanged; only the hashrate denomination is honest now.
  */
+const POOL_UNITS = { ZCASH: 'KH/s', KASPA: 'GH/s', LTC_DOGE: 'GH/s', XMR: 'KH/s' };
+
 const POOL_TIERS = {
+  ZCASH: [
+    { level: 1, cost: 0, hashrate: 2 },
+    { level: 2, cost: 20, hashrate: 10 },
+    { level: 3, cost: 40, hashrate: 20 },
+    { level: 4, cost: 100, hashrate: 50 },
+    { level: 5, cost: 200, hashrate: 100 },
+  ],
   KASPA: [
     { level: 1, cost: 0, hashrate: 10 },
     { level: 2, cost: 5, hashrate: 25 },
@@ -41,26 +56,19 @@ const POOL_TIERS = {
     { level: 4, cost: 25, hashrate: 150 },
     { level: 5, cost: 50, hashrate: 400 },
   ],
-  XMR: [
-    { level: 1, cost: 0, hashrate: 10 },
-    { level: 2, cost: 5, hashrate: 25 },
-    { level: 3, cost: 10, hashrate: 60 },
-    { level: 4, cost: 25, hashrate: 150 },
-    { level: 5, cost: 50, hashrate: 400 },
-  ],
-  ZCASH: [
-    { level: 1, cost: 0, hashrate: 10 },
-    { level: 2, cost: 20, hashrate: 25 },
-    { level: 3, cost: 40, hashrate: 60 },
-    { level: 4, cost: 100, hashrate: 150 },
-    { level: 5, cost: 200, hashrate: 400 },
-  ],
   LTC_DOGE: [
-    { level: 1, cost: 0, hashrate: 10 },
-    { level: 2, cost: 50, hashrate: 25 },
-    { level: 3, cost: 120, hashrate: 60 },
-    { level: 4, cost: 300, hashrate: 150 },
-    { level: 5, cost: 750, hashrate: 400 },
+    { level: 1, cost: 0, hashrate: 1 },
+    { level: 2, cost: 50, hashrate: 5 },
+    { level: 3, cost: 120, hashrate: 12 },
+    { level: 4, cost: 300, hashrate: 30 },
+    { level: 5, cost: 750, hashrate: 60 },
+  ],
+  XMR: [
+    { level: 1, cost: 0, hashrate: 2 },
+    { level: 2, cost: 5, hashrate: 10 },
+    { level: 3, cost: 10, hashrate: 25 },
+    { level: 4, cost: 25, hashrate: 60 },
+    { level: 5, cost: 50, hashrate: 120 },
   ],
 };
 
@@ -445,6 +453,7 @@ async function upgradeRig(req, res) {
     duplicated: false,
     level: nextTier.level,
     hashrate: nextTier.hashrate,
+    unit: POOL_UNITS[targetPool] || 'GH/s',
     discount_pct: discountPct,
     discounted_cost: discountedCost,
     remaining_balance: newBalance,
@@ -639,8 +648,9 @@ async function buySession(req, res) {
     return res.status(400).json({ error: `hours must be one of ${Object.keys(SESSION_HOURS).join(', ')} (72h rentals go through the rent flow)` });
   }
   if (!Number.isFinite(ghs) || ghs < 1 || ghs > 1000) {
-    return res.status(400).json({ error: 'ghs must be between 1 and 1000' });
+    return res.status(400).json({ error: 'ghs must be between 1 and 1000 (pool unit)' });
   }
+  const poolUnit = POOL_UNITS[targetPool] || 'GH/s';
 
   // Idempotency: identical request_id returns the stored result.
   const existing = await pool.query(`${ORDER_SELECT} WHERE h.request_id = $1`, [requestId]);
@@ -736,8 +746,9 @@ async function buySession(req, res) {
     if (ghs > spare + 1e-9) {
       await client.query('ROLLBACK');
       return res.status(409).json({
-        error: `Room ${targetPool} has only ${spare < 0 ? 0 : spare.toFixed(1)} GH/s of spare capacity right now — this session needs ${ghs} GH/s. Try fewer GH/s or a 72h rental (which adds a brand-new rig).`,
+        error: `Room ${targetPool} has only ${spare < 0 ? 0 : spare.toFixed(1)} ${poolUnit} of spare capacity right now — this session needs ${ghs} ${poolUnit}. Try a 72h rental (which adds a brand-new rig).`,
         spare_ghs: spare < 0 ? 0 : spare,
+        unit: poolUnit,
         requested_ghs: ghs,
       });
     }
@@ -752,7 +763,7 @@ async function buySession(req, res) {
       VALUES ($1, $2, $3, $4, 0, 0, 0, 'SESSION', true, $5, 'PLACED', 'SESSION', $6, $7)
       ON CONFLICT (request_id) DO NOTHING
       RETURNING order_id`,
-      [userId, targetPool, requestId, price, POOL_ALGORITHM_MAP[targetPool], `${ghs} GH/s`, hours]
+      [userId, targetPool, requestId, price, POOL_ALGORITHM_MAP[targetPool], `${ghs} ${poolUnit}`, hours]
     );
     if (orderInsert.rowCount === 0) {
       await client.query('ROLLBACK');
@@ -814,6 +825,7 @@ async function buySession(req, res) {
     session: true,
     target_pool: targetPool,
     ghs,
+    unit: poolUnit,
     hours,
     price,
     discount_pct: discountPct,
@@ -826,4 +838,4 @@ async function buySession(req, res) {
   });
 }
 
-module.exports = { upgradeRig, reinvestRig, buySession, sessionPrice, SESSION_HOURS, POOL_TIERS, tiersFor, PROTOCOL_FEE_PCT };
+module.exports = { upgradeRig, reinvestRig, buySession, sessionPrice, SESSION_HOURS, POOL_TIERS, POOL_UNITS, tiersFor, PROTOCOL_FEE_PCT };
