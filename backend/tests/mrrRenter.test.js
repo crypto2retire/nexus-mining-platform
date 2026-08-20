@@ -22,7 +22,7 @@ function setEnv(overrides = {}) {
     MRR_API_KEY: overrides.API_KEY ?? 'test-mrr-key',
     MRR_API_SECRET: overrides.API_SECRET ?? 'test-mrr-secret',
     MRR_LIVE_ORDERS: overrides.LIVE_ORDERS ?? '0',
-    MRR_POOL_PROFILE_ZHASH: overrides.PROFILE_ZHASH ?? '',
+    MRR_POOL_PROFILE_EQUIHASH: overrides.PROFILE_EQUIHASH ?? '',
   };
   for (const [name, value] of Object.entries(values)) {
     process.env[name] = value;
@@ -114,7 +114,7 @@ describe('placeHashpowerOrder (MRR)', () => {
 
   test('POOL_ALGORITHM_MAP covers all marketplace pools (uppercase audit values)', () => {
     expect(POOL_ALGORITHM_MAP).toEqual({
-      ZCASH: 'ZHASH',
+      ZCASH: 'EQUIHASH',
       KASPA: 'KHEAVYHASH',
       LTC_DOGE: 'SCRYPT',
       XMR: 'RANDOMX',
@@ -122,7 +122,7 @@ describe('placeHashpowerOrder (MRR)', () => {
   });
 
   test('live order: finds cheapest affordable rig and posts the rental', async () => {
-    setEnv({ NODE_ENV: 'production', LIVE_ORDERS: '1', PROFILE_ZHASH: '40073' });
+    setEnv({ NODE_ENV: 'production', LIVE_ORDERS: '1', PROFILE_EQUIHASH: '40073' });
     axios.mockImplementation(({ method, url, data }) => {
       if (url.includes('/rig') && method === 'GET') {
         return Promise.resolve({
@@ -132,7 +132,7 @@ describe('placeHashpowerOrder (MRR)', () => {
               records: [
                 {
                   id: '274435',
-                  name: 'Cheap Zhash Rig',
+                  name: 'Cheap Equihash Rig',
                   rpi: '98.5',
                   price: { BTC: { hour: '0.000002181767' } },
                   minhours: 24,
@@ -164,7 +164,7 @@ describe('placeHashpowerOrder (MRR)', () => {
     expect(result.success).toBe(true);
     expect(result.mode).toBe('live');
     expect(result.orderId).toBe('rental-999');
-    expect(result.rigName).toBe('Cheap Zhash Rig');
+    expect(result.rigName).toBe('Cheap Equihash Rig');
     expect(result.rigRpi).toBe(98.5);
     expect(result.rigHours).toBe(72);
 
@@ -174,7 +174,7 @@ describe('placeHashpowerOrder (MRR)', () => {
   });
 
   test('live order: rejects when the cheapest rig minimum exceeds the budget', async () => {
-    setEnv({ NODE_ENV: 'production', LIVE_ORDERS: '1', PROFILE_ZHASH: '40073' });
+    setEnv({ NODE_ENV: 'production', LIVE_ORDERS: '1', PROFILE_EQUIHASH: '40073' });
     axios.mockImplementation(({ method, url }) => {
       if (method === 'GET') {
         return Promise.resolve({
@@ -206,7 +206,7 @@ describe('placeHashpowerOrder (MRR)', () => {
   });
 
   test('live order: surfaces MRR rental rejection instead of false success', async () => {
-    setEnv({ NODE_ENV: 'production', LIVE_ORDERS: '1', PROFILE_ZHASH: '40073' });
+    setEnv({ NODE_ENV: 'production', LIVE_ORDERS: '1', PROFILE_EQUIHASH: '40073' });
     axios.mockImplementation(({ method, url }) => {
       if (method === 'GET') {
         return Promise.resolve({
@@ -216,7 +216,7 @@ describe('placeHashpowerOrder (MRR)', () => {
               records: [
                 {
                   id: '274435',
-                  name: 'Cheap Zhash Rig',
+                  name: 'Cheap Equihash Rig',
                   price: { BTC: { hour: '0.000002181767' } },
                   minhours: 24,
                   maxhours: 120,
@@ -243,15 +243,15 @@ describe('placeHashpowerOrder (MRR)', () => {
   });
 
   test('live order: requires a configured pool profile for the algorithm', async () => {
-    setEnv({ NODE_ENV: 'production', LIVE_ORDERS: '1', PROFILE_ZHASH: '' });
+    setEnv({ NODE_ENV: 'production', LIVE_ORDERS: '1', PROFILE_EQUIHASH: '' });
     const result = await placeHashpowerOrder('ZCASH', 0.000475);
     expect(result.success).toBe(false);
-    expect(result.error).toMatch(/MRR_POOL_PROFILE_ZHASH/);
+    expect(result.error).toMatch(/MRR_POOL_PROFILE_EQUIHASH/);
     expect(axios).not.toHaveBeenCalled();
   });
 
   test('live order: surfaces API errors without throwing', async () => {
-    setEnv({ NODE_ENV: 'production', LIVE_ORDERS: '1', PROFILE_ZHASH: '40073' });
+    setEnv({ NODE_ENV: 'production', LIVE_ORDERS: '1', PROFILE_EQUIHASH: '40073' });
     axios.mockRejectedValue({ response: { data: { data: { message: 'Insufficient balance' } } } });
     const result = await placeHashpowerOrder('ZCASH', 0.000475);
     expect(result.success).toBe(false);
@@ -272,7 +272,7 @@ describe('findAffordableRig', () => {
         },
       },
     });
-    const fit = await findAffordableRig('zhash', 0.000475);
+    const fit = await findAffordableRig('equihash', 0.000475);
     expect(fit.rigId).toBe('a');
     // 0.000475 / 0.000002 = 237h -> capped at MAX_RENTAL_HOURS 72 (not maxhours 120)
     expect(fit.length).toBe(72);
