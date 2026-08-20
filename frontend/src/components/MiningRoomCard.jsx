@@ -12,7 +12,7 @@ const RENTAL_HOURS = 72;
 export default function MiningRoomCard({
   title, pool, rig, pendingReward, upgradeCost, renewCost,
   onUpgrade, onRenew, onClaim, onWithdraw, onReinvest,
-  discountPct, pendingDoge, realBacking,
+  discountPct, pendingDoge, realBacking, payoutStatus,
 }) {
   const [animating, setAnimating] = useState(false);
   const [now, setNow] = useState(Date.now());
@@ -21,6 +21,19 @@ export default function MiningRoomCard({
   const backing = realBacking && realBacking.real_hash != null ? realBacking : null;
   const rentalActive = rig?.rental_active === true;
   const hoursLeft = rig?.rental_hours_left != null ? Number(rig.rental_hours_left) : 0;
+
+  // Pool payout status: what the pool owes the wallet, the pool's minimum
+  // payout, progress, and the observed-rate ETA ("how long until payout").
+  function fmtEta(hours) {
+    if (hours == null || !Number.isFinite(hours)) return null;
+    if (hours >= 48) return `≈ ${(hours / 24).toFixed(1)} days`;
+    if (hours >= 2) return `≈ ${hours.toFixed(1)} hrs`;
+    return `≈ ${Math.max(0, Math.round(hours * 60))} min`;
+  }
+  const ps = payoutStatus || null;
+  const poolUnpaid = ps?.unpaid != null ? Number(ps.unpaid) : null;
+  const threshold = ps?.threshold != null ? Number(ps.threshold) : null;
+  const etaText = ps?.eta_hours != null ? fmtEta(ps.eta_hours) : null;
 
   // Live countdown while the rental window is active.
   useEffect(() => {
@@ -61,6 +74,18 @@ export default function MiningRoomCard({
               {backing.active_rentals && backing.active_rentals.length > 0
                 ? `${Number(backing.real_hash).toFixed(1)} ${backing.real_unit}`
                 : 'no rig running'}
+            </span>
+          </div>
+        )}
+        {ps && (
+          <div className="stat" title="Balance owed to this room's wallet at the mining pool, the pool's minimum payout, and the estimated time until the pool pays at the observed accrual rate.">
+            <span className="stat-label">Pool payout</span>
+            <span className="stat-value accent">
+              {poolUnpaid != null
+                ? `${poolUnpaid >= 0.01 ? poolUnpaid.toFixed(4) : poolUnpaid.toExponential(2)} ${ps.unpaid_unit || ''}`
+                : '—'}
+              {threshold != null && ` · pays at ${threshold} ${ps.unpaid_unit || ''}`}
+              {etaText && ` · ${etaText}`}
             </span>
           </div>
         )}

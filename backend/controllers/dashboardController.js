@@ -1,6 +1,7 @@
 const { pool } = require('../config/db');
 const { isAdminWallet } = require('../middleware/adminAuth');
 const { getBacking } = require('../services/backingMonitor');
+const { getObservedRates, PAYOUT_MIN, WATCHES } = require('../services/payoutTrigger');
 const { tiersFor, sessionPrice, SESSION_HOURS } = require('./upgradeController');
 const { coinsOwnedFor, discountPctFor } = require('../services/multiCoinDiscount');
 
@@ -138,6 +139,35 @@ async function getDashboard(req, res) {
         spareGhsByPool[pool] = real == null ? null : Math.max(0, Number(real) - active);
       }
 
+      // Pool payout status per room: what the pool owes the wallet (unpaid),
+      // the pool's minimum payout, progress toward it, and the observed rate
+      // ETA. Only unpaid-type pools (KAS/ZEC/XMR) get an ETA — LTC/DOGE are
+      // on-chain balance watches (we can't see F2Pool's internal unpaid).
+      const observedRates = await getObservedRates();
+      const payoutStatus = {};
+      for (const pool of pools) {
+        const unpaid = backing[pool]?.pool_unpaid;
+        const threshold = PAYOUT_MIN[pool] ?? null;
+        const mode = WATCHES[pool]?.mode;
+        const rate = observedRates[pool]?.rate_per_day ?? null;
+        let eta_hours = null;
+        if (mode === 'unpaid-drop' && threshold != null && unpaid != null && unpaid > 0 && rate != null && rate > 0) {
+          eta_hours = Math.max(0, ((threshold - unpaid) / rate) * 24);
+        }
+        payoutStatus[pool] = {
+          unpaid: unpaid != null ? Number(unpaid) : null,
+          unpaid_unit: { ZCASH: 'ZEC', KASPA: 'KAS', LTC_DOGE: 'LTC', XMR: 'XMR' }[pool],
+          threshold,
+          progress_pct:
+            threshold != null && unpaid != null && threshold > 0
+              ? Math.min(100, (unpaid / threshold) * 100)
+              : null,
+          eta_hours,
+          observed_rate_per_day: rate,
+          watch_mode: mode,
+        };
+      }
+
       return res.json({
         user_id: userId,
         wallet_address: walletAddress,
@@ -148,6 +178,7 @@ async function getDashboard(req, res) {
         maintenance_rate: maintenanceRateByPool,
         session_prices: sessionPricesByPool,
         spare_ghs: spareGhsByPool,
+        payout_status: payoutStatus,
         pending_rewards: pendingByPool,
         pending_rewards_2: pendingDogeByPool,
         multi_coin: { coins_owned: coinsOwned, discount_pct: discountPctFor(coinsOwned) },

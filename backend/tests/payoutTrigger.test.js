@@ -16,20 +16,31 @@ describe('DOGE merged watch (011)', () => {
   });
 });
 
-describe('2Miners watches (ZEC/KAS) — stats.balance fix', () => {
-  test('KASPA balanceOf reads stats.balance (top-level balance does not exist)', () => {
+describe('2Miners watches (ZEC/KAS) — stats.balance fix + ATOM normalization (015)', () => {
+  test('KASPA balanceOf reads stats.balance and normalizes atoms → KAS', () => {
     const cfg = WATCHES.KASPA;
     // Verified live 2026-08-19: the account API has NO top-level `balance`.
+    // stats.balance is ATOMS (1 KAS = 1e8) — normalize to coin units so the
+    // payout ledger never sees 157,240,000 "KAS" (numeric overflow bug).
     const bal = cfg.balanceOf({ stats: { balance: '125011636' } });
-    expect(bal).toBe(125011636);
+    expect(bal).toBeCloseTo(1.25011636, 8);
     expect(bal).not.toBe(0); // the old Number(d.balance) returned 0 forever
   });
 
-  test('ZCASH balanceOf reads stats.balance with a top-level fallback', () => {
+  test('ZCASH balanceOf reads stats.balance (normalized) with a top-level fallback', () => {
     const cfg = WATCHES.ZCASH;
-    expect(cfg.balanceOf({ stats: { balance: '100' } })).toBe(100);
+    expect(cfg.balanceOf({ stats: { balance: '100' } })).toBeCloseTo(0.000001, 8);
     // API variant that still uses top-level balance.
-    expect(cfg.balanceOf({ balance: '50' })).toBe(50);
+    expect(cfg.balanceOf({ balance: '50' })).toBeCloseTo(0.0000005, 8);
+  });
+
+  test('KAS/ZEC use unpaid-drop detection with the pool minimum, NOT balance-delta', () => {
+    // stats.balance ACCRUES while mining and DROPS when the pool pays the
+    // wallet — balance-delta would fire a bogus payout on every accrual.
+    expect(WATCHES.KASPA.mode).toBe('unpaid-drop');
+    expect(WATCHES.ZCASH.mode).toBe('unpaid-drop');
+    expect(WATCHES.KASPA.minPayout).toBe(50);
+    expect(WATCHES.ZCASH.minPayout).toBeCloseTo(0.01, 4);
   });
 });
 

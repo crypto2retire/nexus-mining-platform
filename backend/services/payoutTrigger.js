@@ -27,38 +27,54 @@ const INTERVAL_MS = Number(process.env.PAYOUT_CHECK_INTERVAL_MS || 600000); // 1
 const XMR_MIN_PAYOUT = Number(process.env.XMR_MIN_PAYOUT || 0.1);
 const EPS = 1e-8;
 
+// Pool minimum payout thresholds (COIN units) — the amount at which each pool
+// sends the wallet its accrued earnings. Sources verified 2026-08-20:
+//   KASPA 50 KAS    (2Miners, verified live in prior sessions)
+//   ZCASH 0.01 ZEC  (2Miners, minerstat + bt-miners pool comparison)
+//   XMR   0.1 XMR   (herominers, XMR_MIN_PAYOUT env)
+//   LTC   0.02 LTC  (F2Pool help center payout-thresholds article)
+//   DOGE  (merged bonus — F2Pool does not publish a DOGE threshold; the
+//          on-chain arrival watch shows the total, no ETA)
+const PAYOUT_MIN = {
+  ZCASH: Number(process.env.ZCASH_MIN_PAYOUT || 0.01),
+  KASPA: Number(process.env.KASPA_MIN_PAYOUT || 50),
+  XMR: Number(process.env.XMR_MIN_PAYOUT || 0.1),
+  LTC_DOGE: Number(process.env.LTC_MIN_PAYOUT || 0.02),
+  LTC_DOGE_DOGE: null,
+};
+
 const WATCHES = {
   ZCASH: {
-    mode: 'balance-delta',
+    // 2Miners stats.balance = UNPAID balance in ATOMS (1 ZEC = 1e8). It
+    // ACCRUES while mining and DROPS when the pool pays the wallet — so the
+    // watch is unpaid-drop (like XMR), NOT balance-delta. Fixed 2026-08-20:
+    // balanceOf used to return raw atoms and balance-delta treated every
+    // accrual as a payout (numeric overflow in the ledger).
+    mode: 'unpaid-drop',
+    minPayout: PAYOUT_MIN.ZCASH,
     walletEnv: 'MRR_PLATFORM_WALLET_ZEC',
     accountUrl: (addr) => `https://zec.2miners.com/api/accounts/${addr}`,
     statsUrl: 'https://zec.2miners.com/api/stats',
-    // 2Miners account API v2 keeps the unpaid balance at stats.balance
-    // (top-level `balance` does NOT exist — verified 2026-08-19 live on the
-    // KAS wallet; the old balanceOf read Number(d.balance) = 0 forever, so the
-    // KAS/ZEC payout watches could never fire). Fall back to d.balance for
-    // API variants that still expose it.
-    balanceOf: (d) => Number(d?.stats?.balance ?? d?.balance ?? 0),
+    balanceOf: (d) => Number(d?.stats?.balance ?? d?.balance ?? 0) / 1e8,
     netHashOf: (d) => Number(d.nodes?.[0]?.networkhashps) || null,
   },
   KASPA: {
-    mode: 'balance-delta',
+    // Same as ZEC: unpaid accrues in atoms, pool pays when it crosses 50 KAS.
+    mode: 'unpaid-drop',
+    minPayout: PAYOUT_MIN.KASPA,
     walletEnv: 'MRR_PLATFORM_WALLET_KAS',
     accountUrl: (addr) => `https://kas.2miners.com/api/accounts/${addr}`,
     statsUrl: 'https://kas.2miners.com/api/stats',
-    balanceOf: (d) => Number(d?.stats?.balance ?? d?.balance ?? 0),
+    balanceOf: (d) => Number(d?.stats?.balance ?? d?.balance ?? 0) / 1e8,
     netHashOf: (d) => Number(d.nodes?.[0]?.networkhashps) || null,
   },
   XMR: {
     mode: 'unpaid-drop',
+    minPayout: PAYOUT_MIN.XMR,
     walletEnv: 'XMR_WALLET_ADDRESS',
     accountUrl: (addr) => `https://monero.herominers.com/api/stats_address?address=${addr}`,
     statsUrl: null,
     balanceOf: (d) => {
-      // stats.balance = the wallet's UNPAID pool balance in atomic units
-      // (1 XMR = 1e12). Verified 2026-08-20: the API's `unlocked` array
-      // entries are colon-separated STRINGS, not objects — summing r.amount
-      // over them always returned 0, so XMR payouts were never detected.
       return Number(d?.stats?.balance || 0) / 1e12;
     },
     netHashOf: () => null,
@@ -66,24 +82,26 @@ const WATCHES = {
   LTC_DOGE: {
     // F2Pool accepts bech32 workers for MINING (stratum-authorize verified
     // 2026-08-19) but its stats page 404s on ltc1... addresses — so the
-    // watcher uses Blockcypher's on-chain balance instead.
+    // watcher uses Blockcypher's on-chain balance instead. On-chain balance
+    // INCREASES when the pool pays out (delta = payout) — balance-delta is
+    // correct here.
     mode: 'balance-delta',
+    minPayout: PAYOUT_MIN.LTC_DOGE,
     walletEnv: 'MRR_PLATFORM_WALLET_LTC',
     accountUrl: (addr) => `https://api.blockcypher.com/v1/ltc/main/addrs/${addr}`,
     statsUrl: null,
-    // Blockcypher returns SATOSHIS (1 LTC = 1e8)
     balanceOf: (d) => Number(d.balance) / 1e8,
     netHashOf: () => null,
   },
   // The DOGE side of the LTC_DOGE pool: F2Pool merged mining pays DOGE to its
-  // own bound address (011_doge_merged). Same balance-delta watch, distributed
-  // as calculated_reward_2 (DOGE units) instead of the LTC reward column.
+  // own bound address (011_doge_merged). Same on-chain balance-delta watch,
+  // distributed as calculated_reward_2 (DOGE units) instead of the LTC column.
   LTC_DOGE_DOGE: {
     mode: 'balance-delta',
+    minPayout: PAYOUT_MIN.LTC_DOGE_DOGE,
     walletEnv: 'MRR_PLATFORM_WALLET_DOGE',
     accountUrl: (addr) => `https://api.blockcypher.com/v1/doge/main/addrs/${addr}`,
     statsUrl: null,
-    // Blockcypher returns DOGE in smallest units (1 DOGE = 1e8)
     balanceOf: (d) => Number(d.balance) / 1e8,
     netHashOf: () => null,
     distribute: 'merged',
@@ -177,8 +195,24 @@ async function checkPool(poolKey) {
   const row = await pool.query('SELECT last_balance FROM payout_watch WHERE pool = $1', [poolKey]);
   const last = row.rowCount > 0 ? Number(row.rows[0].last_balance) : null;
 
-  const minDrop = cfg.mode === 'unpaid-drop' ? XMR_MIN_PAYOUT : 0;
+  const minDrop = cfg.mode === 'unpaid-drop' ? cfg.minPayout ?? 0 : 0;
   const event = computePayoutEvent(last, balance, { minDrop });
+
+  // Append a balance snapshot BEFORE any event handling — this is the
+  // observed-accrual source for the "time until payout" estimate. Coins
+  // (not atoms) in coin units, same as payout_watch.
+  try {
+    await pool.query(
+      'INSERT INTO payout_balance_history (pool, balance) VALUES ($1, $2)',
+      [poolKey, balance]
+    );
+    await pool.query(
+      `DELETE FROM payout_balance_history
+        WHERE checked_at < CURRENT_TIMESTAMP - INTERVAL '30 days'`
+    );
+  } catch (histErr) {
+    console.warn(`payout balance history write failed for ${poolKey}:`, histErr.message);
+  }
 
   if (event.action === 'baseline') {
     await upsertBaseline(poolKey, balance, null, null);
@@ -238,6 +272,45 @@ async function checkPayouts() {
   return results;
 }
 
+/**
+ * Observed accrual rate per pool from the balance history (last 48h window).
+ * This is the honest basis for "how long until payout" — it reflects what
+ * THIS wallet actually accumulated, including network variance and the real
+ * rig share. Returns null until >= 2 samples span >= 1 hour.
+ */
+async function getObservedRates() {
+  const { rows } = await pool.query(
+    `SELECT pool, balance, checked_at FROM payout_balance_history
+      WHERE checked_at >= CURRENT_TIMESTAMP - INTERVAL '48 hours'
+      ORDER BY pool, checked_at`
+  );
+  const byPool = {};
+  for (const r of rows) {
+    (byPool[r.pool] = byPool[r.pool] || []).push(r);
+  }
+  const out = {};
+  for (const [poolKey, pts] of Object.entries(byPool)) {
+    if (pts.length < 2) {
+      out[poolKey] = { rate_per_day: null, sample_hours: null, reason: 'insufficient-history' };
+      continue;
+    }
+    const first = pts[0];
+    const last = pts[pts.length - 1];
+    const hours = (new Date(last.checked_at).getTime() - new Date(first.checked_at).getTime()) / 3600000;
+    if (hours < 1) {
+      out[poolKey] = { rate_per_day: null, sample_hours: hours, reason: 'sample-too-short' };
+      continue;
+    }
+    const ratePerDay = ((Number(last.balance) - Number(first.balance)) / hours) * 24;
+    out[poolKey] = {
+      rate_per_day: ratePerDay > 0 ? ratePerDay : null,
+      sample_hours: hours,
+      reason: ratePerDay > 0 ? 'ok' : 'non-positive-rate',
+    };
+  }
+  return out;
+}
+
 async function getPayoutStatus() {
   const { rows } = await pool.query(
     'SELECT pool, last_balance, last_checked_at, last_payout_amount, last_payout_at FROM payout_watch ORDER BY pool'
@@ -271,4 +344,4 @@ function startPayoutTrigger() {
   console.log(`Payout trigger started (every ${INTERVAL_MS / 60000} min): watching ${Object.keys(WATCHES).join(', ')}`);
 }
 
-module.exports = { startPayoutTrigger, checkPayouts, getPayoutStatus, computePayoutEvent, WATCHES };
+module.exports = { startPayoutTrigger, checkPayouts, getPayoutStatus, getObservedRates, computePayoutEvent, WATCHES, PAYOUT_MIN };

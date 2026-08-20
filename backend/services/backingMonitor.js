@@ -85,14 +85,9 @@ async function buildBacking() {
     const rentals = rentalsByPool[poolName] || [];
     const account = await fetchPoolAccount(poolName);
     const rawUnpaid = account && WATCHES[poolName] ? WATCHES[poolName].balanceOf(account) : null;
-    // WATCHES.balanceOf returns raw atoms for ZEC/KAS (2Miners); Blockcypher and
-    // herominers balanceOf already scale. Normalize to display units.
-    const unpaid =
-      rawUnpaid == null
-        ? null
-        : poolName === 'ZCASH' || poolName === 'KASPA'
-          ? rawUnpaid / 1e8
-          : rawUnpaid;
+    // WATCHES.balanceOf already returns COIN units (2Miners atoms normalized
+    // /1e8, herominers /1e12, Blockcypher /1e8) — no extra scaling here.
+    const unpaid = rawUnpaid == null ? null : rawUnpaid;
     const realHash = await liveRealHash(poolName, rentals);
     // HYBRID model: every backing refresh records what the room ACTUALLY
     // delivered — this is the fair-slice payout denominator and the spare
