@@ -38,6 +38,13 @@ UPDATE virtual_rigs
   WHERE maintenance_status = 'DORMANT'
     AND rental_expires_at IS NULL;
 
+-- Pre-rental leftovers (GoMiner-era rigs) may still be ACTIVE with NO expiry
+-- and no real backing (e.g. the ended LTC demo rental). Expire those too.
+UPDATE virtual_rigs
+  SET maintenance_status = 'EXPIRED'
+  WHERE maintenance_status = 'ACTIVE'
+    AND rental_expires_at IS NULL;
+
 -- Reset the leftover demo-era rigs (Kevin: "xmr should be reset under my
 -- account — it still shows mining activity with nothing active"). A rig with
 -- NO real backing must show ZERO hashrate and never contribute to payouts:
