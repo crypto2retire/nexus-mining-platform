@@ -95,7 +95,7 @@ export default function MiningRoomCard({
             }
           >
             <span className="stat-label">
-              {ps.watch_mode === 'balance-delta' ? 'Paid to wallet' : 'Pool payout'}
+              {ps.watch_mode === 'balance-delta' ? (pool === 'LTC_DOGE' ? 'Paid to wallet (LTC + DOGE)' : 'Paid to wallet') : 'Pool payout'}
             </span>
             <span className="stat-value accent">
               {poolUnpaid != null
