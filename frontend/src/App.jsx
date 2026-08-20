@@ -3,11 +3,9 @@ import MiningRoomCard from './components/MiningRoomCard';
 import SummaryRow from './components/SummaryRow';
 import GetStarted from './components/GetStarted';
 import AdminPanel from './components/AdminPanel';
+import WalletAuth, { AUTH_STORAGE_KEY } from './components/WalletAuth';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
-const STORAGE_KEY = 'nexus.wallet';
-// Nexus accounts are Ethereum-style addresses only (MetaMask / Coinbase Wallet /
-// Trust Wallet). Mining addresses (Zcash, Kaspa, Bitcoin) are NOT valid.
 const VALID_WALLET_RE = /^0x[a-f0-9]{40}$/i;
 
 const POOLS = [
@@ -16,6 +14,27 @@ const POOLS = [
   { key: 'LTC_DOGE', title: 'Litecoin / Dogecoin Merge' },
   { key: 'XMR', title: 'Monero (XMR) Mine' },
 ];
+
+function storedAuth() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(AUTH_STORAGE_KEY) || 'null');
+    if (parsed?.token && VALID_WALLET_RE.test(parsed.wallet || '')) return parsed;
+  } catch (_err) {
+    localStorage.removeItem(AUTH_STORAGE_KEY);
+  }
+  return null;
+}
+
+async function apiResult(response, fallback) {
+  let body;
+  try {
+    body = await response.json();
+  } catch (_err) {
+    throw new Error(fallback);
+  }
+  if (!response.ok) throw new Error(body?.error || fallback);
+  return body;
+}
 
 function useAnimatedPending(pendingByPool) {
   const [display, setDisplay] = useState({});
@@ -44,9 +63,8 @@ function useAnimatedPending(pendingByPool) {
 }
 
 export default function App() {
-  const [wallet, setWallet] = useState(() => localStorage.getItem(STORAGE_KEY) || '');
-  const [connected, setConnected] = useState(false);
-  const [minerStatus, setMinerStatus] = useState(null);
+  const [auth, setAuth] = useState(storedAuth);
+  const [restoringSession, setRestoringSession] = useState(true);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -54,6 +72,7 @@ export default function App() {
   // self-fetches) can re-load after purchases/deposits — it was stuck showing
   // pre-purchase numbers (KAS 25 GH/s while the card showed 75).
   const [dataVersion, setDataVersion] = useState(0);
+  const wallet = auth?.wallet || '';
 
   const fetchDashboard = async (address) => {
     const addr = (address ?? wallet).trim().toLowerCase();
@@ -71,29 +90,29 @@ export default function App() {
       }
       setData(await res.json());
       setDataVersion((v) => v + 1);
-      setConnected(true);
     } catch (err) {
-      setConnected(false);
       setError(err.message);
     } finally {
       setLoading(false);
     }
   };
 
-  const connectWallet = async () => {
+  const authHeaders = () => {
+    if (!auth?.token) throw new Error('Sign in with your wallet before using this action.');
+    return {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${auth.token}`,
+    };
+  };
+
+  const handleAuthChange = (nextAuth) => {
+    setAuth(nextAuth);
     setError('');
-    const trimmed = wallet.trim();
-    if (!VALID_WALLET_RE.test(trimmed)) {
-      setError(
-        "That address can't connect. Nexus accounts use an Ethereum-style wallet address — it starts with 0x followed by 40 letters/numbers (from MetaMask, Coinbase Wallet, or Trust Wallet). Mining addresses (Monero, Zcash, Kaspa, Bitcoin) are not supported for accounts."
-      );
-      setConnected(false);
-      return;
+    if (nextAuth) {
+      fetchDashboard(nextAuth.wallet);
+    } else {
+      setData(null);
     }
-    const normalized = trimmed.toLowerCase();
-    setWallet(normalized);
-    localStorage.setItem(STORAGE_KEY, normalized);
-    await fetchDashboard(normalized);
   };
 
   // RENT: pay USDC (or reinvested tokens) to rent hashrate for a 72h window.
@@ -107,11 +126,10 @@ export default function App() {
         : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
       const res = await fetch(`${API_BASE}/api/rigs/upgrade`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ wallet, target_pool: pool, request_id: requestId, renew }),
+        headers: authHeaders(),
+        body: JSON.stringify({ target_pool: pool, request_id: requestId, renew }),
       });
-      const result = await res.json();
-      if (!res.ok) throw new Error(result.error || 'Rent failed');
+      const result = await apiResult(res, 'Rent failed');
 
       const sandboxTag = result.sandbox ? ' [SANDBOX]' : '';
       const marketplaceTag = result.marketplace ? `\nMarketplace: ${result.marketplace}` : '';
@@ -145,11 +163,10 @@ export default function App() {
         : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
       const res = await fetch(`${API_BASE}/api/rigs/session`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ wallet, target_pool: pool, request_id: requestId, hours, ghs: SESSION_SLOT[pool] || 25 }),
+        headers: authHeaders(),
+        body: JSON.stringify({ target_pool: pool, request_id: requestId, hours, ghs: SESSION_SLOT[pool] || 25 }),
       });
-      const result = await res.json();
-      if (!res.ok) throw new Error(result.error || 'Session purchase failed');
+      const result = await apiResult(res, 'Session purchase failed');
       alert(
         `⏱ Session rented! ${result.ghs} ${result.unit || 'GH/s'} for ${result.hours}h — $${Number(result.price).toFixed(2)}\n` +
           `Window: until ${new Date(result.rental_expires_at).toLocaleString()}\n` +
@@ -171,11 +188,10 @@ export default function App() {
         : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
       const res = await fetch(`${API_BASE}/api/rigs/reinvest`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ wallet, target_pool: pool, request_id: requestId }),
+        headers: authHeaders(),
+        body: JSON.stringify({ target_pool: pool, request_id: requestId }),
       });
-      const result = await res.json();
-      if (!res.ok) throw new Error(result.error || 'Reinvest failed');
+      const result = await apiResult(res, 'Reinvest failed');
 
       const sandboxTag = result.sandbox ? ' [SANDBOX]' : '';
       const marketplaceTag = result.marketplace ? `\nMarketplace: ${result.marketplace}` : '';
@@ -198,11 +214,10 @@ export default function App() {
       setError('');
       const res = await fetch(`${API_BASE}/api/rewards/claim`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ wallet, target_pool: pool }),
+        headers: authHeaders(),
+        body: JSON.stringify({ target_pool: pool }),
       });
-      const result = await res.json();
-      if (!res.ok) throw new Error(result.error || 'Claim failed');
+      const result = await apiResult(res, 'Claim failed');
       if (result.claimed_usdc > 0) {
         alert(`💰 Claimed ${result.claimed_usdc} USDC${result.pools?.length ? ` (${result.pools.join(', ')})` : ''} — added to your balance.`);
       } else {
@@ -228,11 +243,10 @@ export default function App() {
       if (!toAddress) return;
       const res = await fetch(`${API_BASE}/api/rewards/withdraw`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ wallet, target_pool: pool, amount_coin: Number(amount), to_address: toAddress }),
+        headers: authHeaders(),
+        body: JSON.stringify({ target_pool: pool, amount_coin: Number(amount), to_address: toAddress }),
       });
-      const result = await res.json();
-      if (!res.ok) throw new Error(result.error || 'Withdrawal request failed');
+      const result = await apiResult(res, 'Withdrawal request failed');
       alert(`📤 Withdrawal requested: ${result.amount_coin} ${result.target_pool} to ${result.to_address}\nThe platform operator will send it and mark it PAID.`);
       await fetchDashboard();
     } catch (err) {
@@ -241,7 +255,30 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (wallet && VALID_WALLET_RE.test(wallet)) fetchDashboard(wallet);
+    const restore = async () => {
+      if (!auth?.token) {
+        setRestoringSession(false);
+        return;
+      }
+      try {
+        const response = await fetch(`${API_BASE}/api/auth/me`, {
+          headers: { Authorization: `Bearer ${auth.token}` },
+        });
+        const session = await apiResult(response, 'Your wallet session has expired.');
+        const restored = { token: auth.token, wallet: session.wallet };
+        localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(restored));
+        setAuth(restored);
+        await fetchDashboard(session.wallet);
+      } catch (err) {
+        localStorage.removeItem(AUTH_STORAGE_KEY);
+        setAuth(null);
+        setData(null);
+        setError(err.message);
+      } finally {
+        setRestoringSession(false);
+      }
+    };
+    restore();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -272,45 +309,23 @@ export default function App() {
     <div className="app">
       <header className="topbar">
         <h1 className="logo">Nexus Mining Engine</h1>
-        <div className="wallet-bar">
-          <input
-            className={`wallet-input${wallet && !VALID_WALLET_RE.test(wallet.trim()) ? ' invalid' : ''}`}
-            value={wallet}
-            onChange={(e) => {
-              const v = e.target.value;
-              setWallet(v);
-              localStorage.setItem(STORAGE_KEY, v);
-            }}
-            onKeyDown={(e) => { if (e.key === 'Enter') connectWallet(); }}
-            placeholder="0x..."
-            spellCheck={false}
-          />
-          <button className="btn-primary" onClick={connectWallet}>
-            {connected ? 'Reconnect' : 'Connect Wallet'}
-          </button>
-          {connected && data && (
-            <span className="connected-chip" title={wallet}>
-              ✓ {wallet.slice(0, 6)}…{wallet.slice(-4)}
-            </span>
-          )}
-        </div>
+        <WalletAuth auth={auth} onAuthChange={handleAuthChange} />
       </header>
 
       <main className="container">
         {error && <div className="error-banner">{error}</div>}
-        {loading && !data && <div className="loading">Loading dashboard…</div>}
+        {(restoringSession || (loading && !data)) && <div className="loading">Loading wallet session…</div>}
 
-        {!wallet && !error && (
+        {!restoringSession && !auth && !error && (
           <div className="empty-wallet-banner">
-            Enter your Ethereum-style wallet address above (<strong>0x + 40 characters</strong> — from
-            MetaMask, Coinbase Wallet, or Trust Wallet) and click <strong>Connect Wallet</strong> to
-            create your account.
+            Sign in with your browser wallet to view your account and authorize purchases, claims, and withdrawals.
+            Nexus never asks for your recovery phrase.
           </div>
         )}
 
         {data && (
           <>
-            {connected && isEmptyAccount && (
+            {auth && isEmptyAccount && (
               <div className="empty-wallet-banner">
                 Account connected ✓ — your balance is 0.0000 USDC. Fund your account by sending{' '}
                 <strong>USDC on the Base network</strong> to:
@@ -330,8 +345,6 @@ export default function App() {
             />
 
             <GetStarted depositAddress={data.deposit_address} />
-
-            {data.is_admin && <AdminPanel wallet={wallet} refreshKey={dataVersion} />}
 
             <section className="mining-grid">
               {POOLS.map((pool) => (
@@ -360,6 +373,8 @@ export default function App() {
             </section>
           </>
         )}
+
+        {!restoringSession && <AdminPanel refreshKey={dataVersion} />}
       </main>
 
       <footer className="footer">

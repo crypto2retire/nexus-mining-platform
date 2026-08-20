@@ -1,5 +1,4 @@
 const { pool } = require('../config/db');
-const { isAdminWallet } = require('../middleware/adminAuth');
 const { getBacking } = require('../services/backingMonitor');
 const { getObservedRates, PAYOUT_MIN, WATCHES } = require('../services/payoutTrigger');
 const { tiersFor, sessionPrice, SESSION_HOURS } = require('./upgradeController');
@@ -202,7 +201,6 @@ async function getDashboard(req, res) {
         pending_rewards: pendingByPool,
         pending_rewards_2: pendingDogeByPool,
         multi_coin: { coins_owned: coinsOwned, discount_pct: discountPctFor(coinsOwned) },
-        is_admin: isAdminWallet(walletAddress),
         // Real backing per coin (cached 60s) — what ACTUALLY mines this room.
         backing,
         // Never expose a missing/zero-address treasury — the zero address is a

@@ -34,9 +34,9 @@ export default function GetStarted({ depositAddress }) {
               recovery phrase</em> — never share it with anyone.
             </li>
             <li>
-              <strong>Copy your address.</strong> In MetaMask, click your account name and copy the
-              address — it starts with <code>0x</code> and is 42 characters long. Paste it in the
-              box above and click <strong>Connect Wallet</strong>. Your address is your account.
+              <strong>Sign in securely.</strong> Click <strong>Sign in with wallet</strong>, choose your
+              account, and approve the one-time sign-in message. This proves the address belongs to
+              you without sending a transaction or exposing your recovery phrase.
             </li>
             <li>
               <strong>Fund with USDC on the Base network.</strong> Rentals are paid in USDC. Send
@@ -70,7 +70,8 @@ export default function GetStarted({ depositAddress }) {
 
           <div className="get-started-tip">
             <strong>Heads up:</strong> mining addresses (Monero, Zcash, Kaspa, Bitcoin) can't be
-            used to connect — Nexus accounts use Ethereum wallets only.
+            used to sign in — Nexus accounts use Ethereum wallets only. Never type or share your
+            recovery phrase with Nexus or anyone claiming to represent it.
           </div>
         </div>
       )}

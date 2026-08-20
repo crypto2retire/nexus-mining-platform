@@ -130,7 +130,7 @@ describe('claimRewards', () => {
     mockPoolQueries(); // user + pending pools = ['ZCASH']
     mockPrice(50); // $50/ZEC → each row = $50, total $100
     const res = makeRes();
-    await claimRewards({ body: { wallet: WALLET } }, res);
+    await claimRewards({ auth: { wallet: WALLET }, body: {} }, res);
 
     expect(res.json).toHaveBeenCalledWith(
       expect.objectContaining({ success: true, claimed_usdc: 100, rows: 2, pools: ['ZCASH'] })
@@ -149,7 +149,7 @@ describe('claimRewards', () => {
     mockPoolQueries({ pendingPools: [] });
     mockPrice(50);
     const res = makeRes();
-    await claimRewards({ body: { wallet: WALLET } }, res);
+    await claimRewards({ auth: { wallet: WALLET }, body: {} }, res);
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ success: true, claimed_usdc: 0 }));
     expect(pool.connect).not.toHaveBeenCalled();
   });
@@ -159,13 +159,13 @@ describe('claimRewards', () => {
     mockPoolQueries();
     axios.get.mockRejectedValue(new Error('coingecko down'));
     const res = makeRes();
-    await claimRewards({ body: { wallet: WALLET } }, res);
+    await claimRewards({ auth: { wallet: WALLET }, body: {} }, res);
     expect(res.status).toHaveBeenCalledWith(502);
   });
 
   test('rejects invalid wallet format', async () => {
     const res = makeRes();
-    await claimRewards({ body: { wallet: 'not-a-wallet' } }, res);
+    await claimRewards({ auth: { wallet: 'not-a-wallet' }, body: {} }, res);
     expect(res.status).toHaveBeenCalledWith(400);
   });
 });
@@ -201,7 +201,8 @@ describe('withdrawRewards', () => {
     const client = withdrawClient({ available: 5 });
     const res = makeRes();
     await withdrawRewards({
-      body: { wallet: WALLET, target_pool: 'ZCASH', amount_coin: 2, to_address: 't1V5oarvihbomZswPw381AowjPpGj1t2B3K' },
+      auth: { wallet: WALLET },
+      body: { target_pool: 'ZCASH', amount_coin: 2, to_address: 't1V5oarvihbomZswPw381AowjPpGj1t2B3K' },
     }, res);
     expect(res.json).toHaveBeenCalledWith(
       expect.objectContaining({ success: true, withdrawal_id: 'withdraw-1', target_pool: 'ZCASH', amount_coin: 2, status: 'PENDING' })
@@ -215,7 +216,8 @@ describe('withdrawRewards', () => {
     withdrawClient({ available: 1 });
     const res = makeRes();
     await withdrawRewards({
-      body: { wallet: WALLET, target_pool: 'ZCASH', amount_coin: 5, to_address: 't1V5oarvihbomZswPw381AowjPpGj1t2B3K' },
+      auth: { wallet: WALLET },
+      body: { target_pool: 'ZCASH', amount_coin: 5, to_address: 't1V5oarvihbomZswPw381AowjPpGj1t2B3K' },
     }, res);
     expect(res.status).toHaveBeenCalledWith(400);
   });
@@ -225,7 +227,8 @@ describe('withdrawRewards', () => {
     const res = makeRes();
     // ZEC addresses must start t1... — a 0x EVM address is not valid ZEC.
     await withdrawRewards({
-      body: { wallet: WALLET, target_pool: 'ZCASH', amount_coin: 1, to_address: '0x2222222222222222222222222222222222222222' },
+      auth: { wallet: WALLET },
+      body: { target_pool: 'ZCASH', amount_coin: 1, to_address: '0x2222222222222222222222222222222222222222' },
     }, res);
     expect(res.status).toHaveBeenCalledWith(400);
   });
@@ -233,7 +236,8 @@ describe('withdrawRewards', () => {
   test('rejects unknown target pools', async () => {
     const res = makeRes();
     await withdrawRewards({
-      body: { wallet: WALLET, target_pool: 'DOGE', amount_coin: 1, to_address: 'DLB4xWPeFU9mXjLTJUJcQhNZX6pWPYv8VW' },
+      auth: { wallet: WALLET },
+      body: { target_pool: 'DOGE', amount_coin: 1, to_address: 'DLB4xWPeFU9mXjLTJUJcQhNZX6pWPYv8VW' },
     }, res);
     expect(res.status).toHaveBeenCalledWith(400);
   });
@@ -243,7 +247,7 @@ describe('getRewards', () => {
   test('returns empty rewards for a wallet with no account', async () => {
     pool.query.mockResolvedValueOnce({ rowCount: 0, rows: [] });
     const res = makeRes();
-    await getRewards({ query: { wallet: WALLET } }, res);
+    await getRewards({ auth: { wallet: WALLET }, query: { wallet: '0x2222222222222222222222222222222222222222' } }, res);
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ rewards: [] }));
   });
 });

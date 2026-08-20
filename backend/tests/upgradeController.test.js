@@ -73,12 +73,13 @@ function makeRes() {
 }
 
 function req(overrides = {}) {
+  const { wallet = WALLET, ...bodyOverrides } = overrides;
   return {
+    auth: { wallet },
     body: {
-      wallet: WALLET,
       target_pool: 'ZCASH',
       request_id: 'req-1',
-      ...overrides,
+      ...bodyOverrides,
     },
   };
 }
@@ -473,7 +474,7 @@ describe('buySession — hybrid short sessions', () => {
     const { client, calls } = sessionClient();
     const res = makeSessionRes();
     await buySession(
-      { body: { wallet: WALLET, target_pool: 'KASPA', request_id: 'sess-1', hours: 1, ghs: 25 } },
+      { auth: { wallet: WALLET }, body: { target_pool: 'KASPA', request_id: 'sess-1', hours: 1, ghs: 25 } },
       res
     );
 
@@ -511,7 +512,7 @@ describe('buySession — hybrid short sessions', () => {
     const { client } = sessionClient({ activeCredits: 180, myHashrate: 180 });
     const res = makeSessionRes();
     await buySession(
-      { body: { wallet: WALLET, target_pool: 'KASPA', request_id: 'sess-2', hours: 1, ghs: 25 } },
+      { auth: { wallet: WALLET }, body: { target_pool: 'KASPA', request_id: 'sess-2', hours: 1, ghs: 25 } },
       res
     );
     expect(res.statusCode).toBe(409);
@@ -521,7 +522,7 @@ describe('buySession — hybrid short sessions', () => {
   test('validation: 72h is NOT a session — must use the rent flow', async () => {
     const res = makeSessionRes();
     await buySession(
-      { body: { wallet: WALLET, target_pool: 'KASPA', request_id: 'sess-3', hours: 72, ghs: 25 } },
+      { auth: { wallet: WALLET }, body: { target_pool: 'KASPA', request_id: 'sess-3', hours: 72, ghs: 25 } },
       res
     );
     expect(res.statusCode).toBe(400);
@@ -532,7 +533,7 @@ describe('buySession — hybrid short sessions', () => {
     fetchLiveRealHash.mockResolvedValue(null);
     const res = makeSessionRes();
     await buySession(
-      { body: { wallet: WALLET, target_pool: 'KASPA', request_id: 'sess-4', hours: 1, ghs: 25 } },
+      { auth: { wallet: WALLET }, body: { target_pool: 'KASPA', request_id: 'sess-4', hours: 1, ghs: 25 } },
       res
     );
     expect(res.statusCode).toBe(503);

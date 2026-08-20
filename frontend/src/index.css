@@ -54,6 +54,30 @@ body {
   gap: 0.75rem;
 }
 
+.wallet-auth {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.wallet-auth-button {
+  flex: 0 0 auto;
+}
+
+.wallet-auth-message,
+.wallet-auth-error {
+  max-width: 34rem;
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.wallet-auth-error {
+  color: var(--danger);
+}
+
 .wallet-input {
   width: 340px;
   padding: 0.6rem 0.8rem;
@@ -188,6 +212,23 @@ body {
 }
 .admin-title-row .admin-title {
   margin: 0; /* override the standalone bottom margin inside the flex row */
+}
+
+.admin-auth-row {
+  display: flex;
+  gap: 0.5rem;
+  margin: 0.75rem 0;
+  flex-wrap: wrap;
+}
+
+.admin-key-input {
+  flex: 1 1 20rem;
+  min-width: 12rem;
+  padding: 0.6rem 0.8rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
 }
 
 .summary-label {
@@ -584,6 +625,9 @@ button:disabled {
   }
   .wallet-input {
     width: 100%;
+  }
+  .wallet-auth {
+    justify-content: flex-start;
   }
   .summary-row {
     grid-template-columns: 1fr;

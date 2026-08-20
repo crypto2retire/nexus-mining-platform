@@ -388,13 +388,13 @@ describe('reinvestRig — mined tokens fund the next rental', () => {
 
   test('rejects invalid wallet', async () => {
     const res = makeRes();
-    await reinvestRig({ body: { wallet: 'nope', target_pool: 'KASPA', request_id: 'req-1' } }, res);
+    await reinvestRig({ auth: { wallet: 'nope' }, body: { target_pool: 'KASPA', request_id: 'req-1' } }, res);
     expect(res.statusCode).toBe(400);
   });
 
   test('rejects unknown pool', async () => {
     const res = makeRes();
-    await reinvestRig({ body: { wallet: WALLET, target_pool: 'DOGE', request_id: 'req-1' } }, res);
+    await reinvestRig({ auth: { wallet: WALLET }, body: { target_pool: 'DOGE', request_id: 'req-1' } }, res);
     expect(res.statusCode).toBe(400);
   });
 
@@ -412,7 +412,7 @@ describe('reinvestRig — mined tokens fund the next rental', () => {
       throw new Error(`unexpected sql: ${sql}`);
     });
     const res = makeRes();
-    await reinvestRig({ body: { wallet: WALLET, target_pool: 'KASPA', request_id: 'req-empty' } }, res);
+    await reinvestRig({ auth: { wallet: WALLET }, body: { target_pool: 'KASPA', request_id: 'req-empty' } }, res);
     expect(res.statusCode).toBe(400);
     expect(res.body.error).toMatch(/No mined KASPA tokens/);
   });

@@ -91,6 +91,8 @@ click). A repeated `request_id` returns the stored order (`duplicated: true`) wi
 | `BASE_RPC_URL` | Base mainnet RPC endpoint (deposit listener) |
 | `PLATFORM_TREASURY_WALLET` | USDC receiving treasury wallet |
 | `INTERNAL_SECRET_API_KEY` | Secret for reward webhook |
+| `JWT_SECRET` | Random 32+ character secret used to sign 24-hour wallet sessions |
+| `ADMIN_API_KEY` | Separate random 32+ character credential for operator endpoints |
 | `NICEHASH_API_KEY` / `NICEHASH_API_SECRET` / `NICEHASH_ORG_ID` | NiceHash API credentials (order permission) |
 | `NICEHASH_POOL_ID` | Pool registered under your NiceHash org (required for live orders) |
 | `NICEHASH_LIVE_ORDERS` | `1` to enable real order placement (with all other guards) |
@@ -101,8 +103,13 @@ click). A repeated `request_id` returns the stored order (`duplicated: true`) wi
 
 ## API Endpoints
 
-- `GET /api/dashboard?wallet=0x...` — user dashboard
-- `POST /api/rigs/upgrade` — upgrade rig; body `{ wallet, target_pool, request_id }`
+- `POST /api/auth/challenge` — create a five-minute wallet-signing challenge
+- `POST /api/auth/verify` — verify the signed challenge and return a 24-hour Bearer token
+- `GET /api/auth/me` — restore the authenticated wallet from a Bearer token
+- `GET /api/dashboard?wallet=0x...` — public, read-only user dashboard
+- `POST /api/rigs/upgrade` — authenticated upgrade; body `{ target_pool, request_id }`
+- `GET /api/rewards`, `POST /api/rewards/claim`, and `POST /api/rewards/withdraw` — authenticated wallet routes
+- Operator routes require the separate `x-admin-key` header; wallet addresses are never administrator credentials
 - `POST /api/rewards/webhook` — external payout webhook (X-API-Secret protected)
 - `GET /api/miner/status` — live local miner stats (proxies XMRIG_API_URL, default local XMRig :8080)
 

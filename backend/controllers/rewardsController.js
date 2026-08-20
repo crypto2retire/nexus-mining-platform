@@ -81,9 +81,9 @@ function validWallet(wallet) {
   return typeof wallet === 'string' && /^0x[a-f0-9]{40}$/i.test(wallet);
 }
 
-/** GET /api/rewards?wallet=... — per-payout ledger for the connected wallet. */
+/** GET /api/rewards — per-payout ledger for the authenticated wallet. */
 async function getRewards(req, res) {
-  const walletAddress = (req.query.wallet || '').toLowerCase();
+  const walletAddress = req.auth.wallet;
   if (!validWallet(walletAddress)) {
     return res.status(400).json({ error: 'Valid wallet address is required' });
   }
@@ -163,7 +163,7 @@ async function getRewards(req, res) {
 
 /** POST /api/rewards/claim — convert UNCLAIMED rewards to USDC balance. */
 async function claimRewards(req, res) {
-  const walletAddress = (req.body.wallet || '').toLowerCase();
+  const walletAddress = req.auth.wallet;
   if (!validWallet(walletAddress)) {
     return res.status(400).json({ error: 'Valid wallet address is required' });
   }
@@ -310,7 +310,7 @@ const ADDRESS_RULES = {
 };
 
 async function withdrawRewards(req, res) {
-  const walletAddress = (req.body.wallet || '').toLowerCase();
+  const walletAddress = req.auth.wallet;
   const targetPool = req.body.target_pool;
   const amountCoin = Number(req.body.amount_coin);
   const toAddress = String(req.body.to_address || '').trim();

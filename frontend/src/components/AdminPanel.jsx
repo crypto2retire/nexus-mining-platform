@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
+const ADMIN_KEY_STORAGE = 'nexus.adminKey';
 
 const POOL_LABELS = {
   ZCASH: 'ZEC',
@@ -15,12 +16,24 @@ const POOL_KEYS = ['ZCASH', 'KASPA', 'LTC_DOGE', 'XMR'];
 const POOL_UNITS = { ZCASH: 'KH/s', KASPA: 'GH/s', LTC_DOGE: 'GH/s', XMR: 'KH/s' };
 
 /**
- * Operator-only panel. Rendered only when the connected wallet is on the
- * ADMIN_WALLETS allow-list (backend sets is_admin on the dashboard payload).
- * Every admin call sends the wallet as the x-wallet header so the backend
- * can enforce the same allow-list on each request.
+ * Operator-only panel. The administrator enters a credential that is separate
+ * from wallet authentication. Every operator request sends that credential in
+ * the x-admin-key header; a public wallet address is never an admin credential.
  */
-export default function AdminPanel({ wallet, refreshKey = 0 }) {
+async function adminResult(response, fallback) {
+  let body;
+  try {
+    body = await response.json();
+  } catch (_err) {
+    throw new Error(fallback);
+  }
+  if (!response.ok) throw new Error(body?.error || fallback);
+  return body;
+}
+
+export default function AdminPanel({ refreshKey = 0 }) {
+  const [adminKey, setAdminKey] = useState(() => localStorage.getItem(ADMIN_KEY_STORAGE) || '');
+  const [keyDraft, setKeyDraft] = useState(() => localStorage.getItem(ADMIN_KEY_STORAGE) || '');
   const [withdrawals, setWithdrawals] = useState(null);
   const [payoutStatus, setPayoutStatus] = useState(null);
   const [stats, setStats] = useState(null);
@@ -31,7 +44,7 @@ export default function AdminPanel({ wallet, refreshKey = 0 }) {
 
   const headers = {
     'Content-Type': 'application/json',
-    'x-wallet': wallet,
+    'x-admin-key': adminKey,
   };
 
   const flash = (m) => {
@@ -40,12 +53,13 @@ export default function AdminPanel({ wallet, refreshKey = 0 }) {
   };
 
   const loadAll = useCallback(async () => {
+    if (!adminKey) return;
     try {
       const [w, p, s, b] = await Promise.all([
-        fetch(`${API_BASE}/api/rewards/withdrawals`, { headers }).then((r) => r.json()),
-        fetch(`${API_BASE}/api/rewards/payout-status`, { headers }).then((r) => r.json()),
-        fetch(`${API_BASE}/api/admin/stats`, { headers }).then((r) => r.json()),
-        fetch(`${API_BASE}/api/admin/backing`, { headers }).then((r) => r.json()),
+        fetch(`${API_BASE}/api/rewards/withdrawals`, { headers }).then((r) => adminResult(r, 'Could not load withdrawals.')),
+        fetch(`${API_BASE}/api/rewards/payout-status`, { headers }).then((r) => adminResult(r, 'Could not load payout status.')),
+        fetch(`${API_BASE}/api/admin/stats`, { headers }).then((r) => adminResult(r, 'Could not load platform statistics.')),
+        fetch(`${API_BASE}/api/admin/backing`, { headers }).then((r) => adminResult(r, 'Could not load backing data.')),
       ]);
       setWithdrawals(w.withdrawals || []);
       setPayoutStatus(p);
@@ -54,13 +68,30 @@ export default function AdminPanel({ wallet, refreshKey = 0 }) {
     } catch (e) {
       setMsg(`Load failed: ${e.message}`);
     }
-  }, [wallet]);
+  }, [adminKey]);
 
   useEffect(() => {
-    if (wallet) loadAll();
+    if (adminKey) loadAll();
     // refreshKey bumps after every dashboard fetch (purchases, deposits,
     // claims) — re-load the admin tables so they never go stale.
-  }, [wallet, loadAll, refreshKey]);
+  }, [adminKey, loadAll, refreshKey]);
+
+  const saveAdminKey = () => {
+    const normalized = keyDraft.trim();
+    if (!normalized) return flash('Enter the administrator API key');
+    localStorage.setItem(ADMIN_KEY_STORAGE, normalized);
+    setAdminKey(normalized);
+  };
+
+  const clearAdminKey = () => {
+    localStorage.removeItem(ADMIN_KEY_STORAGE);
+    setAdminKey('');
+    setKeyDraft('');
+    setWithdrawals(null);
+    setPayoutStatus(null);
+    setStats(null);
+    setBacking(null);
+  };
 
   const markPaid = async (id) => {
     const txHash = (txHashes[id] || '').trim();
@@ -72,8 +103,7 @@ export default function AdminPanel({ wallet, refreshKey = 0 }) {
         headers,
         body: JSON.stringify({ tx_hash: txHash }),
       });
-      const j = await r.json();
-      if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      await adminResult(r, 'Could not mark the withdrawal paid.');
       flash(`Withdrawal ${id} marked PAID`);
       loadAll();
     } catch (e) {
@@ -92,8 +122,7 @@ export default function AdminPanel({ wallet, refreshKey = 0 }) {
         headers,
         body: JSON.stringify({}),
       });
-      const j = await r.json();
-      if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      await adminResult(r, 'Could not reject the withdrawal.');
       flash(`Withdrawal ${id} REJECTED — rewards released`);
       loadAll();
     } catch (e) {
@@ -111,8 +140,7 @@ export default function AdminPanel({ wallet, refreshKey = 0 }) {
         headers,
         body: JSON.stringify({}),
       });
-      const j = await r.json();
-      if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      await adminResult(r, 'Could not run the payout check.');
       flash('Payout check complete — refresh status below');
       loadAll();
     } catch (e) {
@@ -126,13 +154,28 @@ export default function AdminPanel({ wallet, refreshKey = 0 }) {
     <section className="admin-panel">
       <div className="admin-title-row">
         <h2 className="admin-title">⚙ Admin</h2>
-        <button className="btn-secondary btn-small" onClick={() => loadAll()}>
-          ↻ Refresh
-        </button>
+        {adminKey && (
+          <button className="btn-secondary btn-small" onClick={() => loadAll()}>
+            ↻ Refresh
+          </button>
+        )}
+      </div>
+      <div className="admin-auth-row">
+        <input
+          className="admin-key-input"
+          type="password"
+          autoComplete="off"
+          value={keyDraft}
+          onChange={(event) => setKeyDraft(event.target.value)}
+          placeholder="Administrator API key"
+          aria-label="Administrator API key"
+        />
+        <button className="btn-secondary btn-small" onClick={saveAdminKey}>Use key</button>
+        {adminKey && <button className="btn-secondary btn-small" onClick={clearAdminKey}>Clear</button>}
       </div>
       {msg && <div className="admin-msg">{msg}</div>}
 
-      <div className="admin-grid">
+      {adminKey ? <div className="admin-grid">
         {/* Platform overview */}
         <div className="admin-card">
           <h3>Platform overview</h3>
@@ -324,7 +367,7 @@ export default function AdminPanel({ wallet, refreshKey = 0 }) {
             Check payouts now
           </button>
         </div>
-      </div>
+      </div> : <p className="admin-empty">Enter the separate administrator API key to load operator controls.</p>}
     </section>
   );
 }

@@ -115,7 +115,7 @@ function duplicateResponse(row) {
 }
 
 async function upgradeRig(req, res) {
-  const walletAddress = (req.body.wallet || '').toLowerCase();
+  const walletAddress = req.auth.wallet;
   const targetPool = req.body.target_pool;
   const requestId = String(req.body.request_id || '').trim();
   // renew=true re-rents the CURRENT tier (extends the window by the rented
@@ -486,7 +486,7 @@ async function upgradeRig(req, res) {
  * balance — nothing is lost, and the request_id stays idempotent.
  */
 async function reinvestRig(req, res) {
-  const walletAddress = (req.body.wallet || '').toLowerCase();
+  const walletAddress = req.auth.wallet;
   const targetPool = req.body.target_pool;
   const requestId = String(req.body.request_id || '').trim();
   const renew = req.body.renew === true || req.body.renew === 'true';
@@ -625,7 +625,7 @@ function sessionPrice(pool, ghs, hours, discountPct = 0) {
  * Idempotent via request_id (same unique index as rentals).
  */
 async function buySession(req, res) {
-  const walletAddress = (req.body.wallet || '').toLowerCase();
+  const walletAddress = req.auth.wallet;
   const targetPool = req.body.target_pool;
   const requestId = String(req.body.request_id || '').trim();
   const hours = Number(req.body.hours);

@@ -1,48 +1,30 @@
-/**
- * Admin authorization middleware.
- *
- * Nexus operator endpoints (withdrawal queue, payout checks, miner control)
- * are gated to a wallet allow-list in ADMIN_WALLETS (comma-separated,
- * case-insensitive 0x addresses). The frontend sends the connected wallet
- * in the `x-wallet` header; API clients may also pass ?wallet= on query
- * routes where the frontend does.
- *
- * Returns 403 for non-admins. If ADMIN_WALLETS is unset, admin routes are
- * FORBIDDEN by default (fail closed — never open operator actions).
- */
-function requireAdmin(req, res, next) {
-  const allowList = (process.env.ADMIN_WALLETS || '')
-    .split(',')
-    .map((w) => w.trim().toLowerCase())
-    .filter(Boolean);
+const crypto = require('crypto');
 
-  if (allowList.length === 0) {
-    return res.status(403).json({ error: 'Admin access is not configured' });
-  }
+const ADMIN_ERROR = 'Administrator authentication failed';
 
-  const provided =
-    (req.get('x-wallet') || '').trim().toLowerCase() ||
-    (req.query.wallet || '').trim().toLowerCase();
-
-  if (!provided || !/^0x[a-f0-9]{40}$/i.test(provided)) {
-    return res.status(401).json({ error: 'A valid wallet address is required' });
-  }
-
-  if (!allowList.includes(provided)) {
-    return res.status(403).json({ error: 'Forbidden: wallet is not an administrator' });
-  }
-
-  req.adminWallet = provided;
-  next();
+function keyHash(value) {
+  return crypto.createHash('sha256').update(String(value || ''), 'utf8').digest();
 }
 
-/** True when the given wallet is on the ADMIN_WALLETS allow-list. */
-function isAdminWallet(wallet) {
-  const allowList = (process.env.ADMIN_WALLETS || '')
-    .split(',')
-    .map((w) => w.trim().toLowerCase())
-    .filter(Boolean);
-  return Boolean(wallet && allowList.includes(String(wallet).trim().toLowerCase()));
+function requireAdminKey(req, res, next) {
+  const expected = process.env.ADMIN_API_KEY;
+  const provided = req.get('x-admin-key');
+
+  if (!expected) {
+    if (process.env.NODE_ENV === 'production') {
+      console.error('ADMIN_API_KEY is required in production');
+    }
+    return res.status(403).json({ error: ADMIN_ERROR });
+  }
+  if (!provided) {
+    return res.status(401).json({ error: ADMIN_ERROR });
+  }
+
+  const matches = crypto.timingSafeEqual(keyHash(provided), keyHash(expected));
+  if (!matches) {
+    return res.status(403).json({ error: ADMIN_ERROR });
+  }
+  return next();
 }
 
-module.exports = { requireAdmin, isAdminWallet };
+module.exports = { requireAdminKey, ADMIN_ERROR };
