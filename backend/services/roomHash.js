@@ -81,7 +81,7 @@ async function fetchLiveRealHash(pool, activeRentals = []) {
       if (r.mrr_rental_id) total += await rentalRealGhs(r.mrr_rental_id);
     }
     if (total > 0) {
-      return pool === 'ZCASH' ? total * 1e3 : total; // GH/s -> KH/s for ZEC
+      return pool === 'ZCASH' ? total * 1e6 : total; // GH/s -> KH/s (1 GH = 1e6 KH)
     }
     if (pool === 'ZCASH') {
       const data = await fetchPoolAccount(pool);
