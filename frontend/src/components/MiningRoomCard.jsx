@@ -217,7 +217,7 @@ export default function MiningRoomCard({
                         : `Room has ${spareGhs != null ? spareGhs.toFixed(1) : '—'} GH/s spare — need 25`
                   }
                 >
-                  {hours}h — {sessionPrice != null ? price(sessionPrice) : '—'}
+                  {hours}h — {sessionPrice != null ? `$${sessionPrice.toFixed(2)}` : '—'}
                 </button>
               ))}
           </div>
