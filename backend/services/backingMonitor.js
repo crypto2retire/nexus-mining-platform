@@ -11,23 +11,21 @@ const { getOrderStatus } = require('./mrrRenter');
  *   active_rentals           — real MRR rentals currently running (rig_rentals)
  *   real_hash / real_unit    — measured hashrate landing at the pool wallet
  *                              (2Miners currentHashrate for ZEC/KAS; MRR rental
- *                              average for LTC)
+ *                              average for LTC; herominers hashrate_24h for XMR)
  *   pool_unpaid              — unpaid balance sitting at the pool (display units)
  *   mined_total / mined_2    — real payouts received (real_pool_payouts)
- *
- * (The XMR self-mined demo pool was REMOVED 2026-08-19 — no XMR entry.)
  *
  * All live fetches are cached 60s so the admin panel never hammers pools.
  * A failed live fetch degrades to nulls — the panel must never block.
  */
 
 const TTL_MS = 60000;
-const POOLS = ['ZCASH', 'KASPA', 'LTC_DOGE'];
+const POOLS = ['ZCASH', 'KASPA', 'LTC_DOGE', 'XMR'];
 
 // Display unit per pool for real hashrate (natural scale).
-const REAL_UNITS = { ZCASH: 'KH/s', KASPA: 'GH/s', LTC_DOGE: 'GH/s' };
+const REAL_UNITS = { ZCASH: 'KH/s', KASPA: 'GH/s', LTC_DOGE: 'GH/s', XMR: 'H/s' };
 // Pool balances come back in smallest units — scale for display.
-const POOL_DECIMALS = { ZCASH: 8, KASPA: 8, LTC_DOGE: 8 };
+const POOL_DECIMALS = { ZCASH: 8, KASPA: 8, LTC_DOGE: 8, XMR: 12 };
 
 let cache = null;
 let cacheAt = 0;
@@ -74,6 +72,14 @@ async function liveRealHash(pool, activeRentals) {
       if (r.mrr_rental_id) total += await rentalRealGhs(r.mrr_rental_id);
     }
     return total;
+  }
+  if (pool === 'XMR') {
+    // herominers stats_address exposes hashrate_24h (H/s) — the honest
+    // "hashrate that actually landed" for the platform XMR wallet.
+    const data = await fetchPoolAccount(pool);
+    const h = data?.stats?.hashrate_24h ?? data?.hashrate_24h;
+    if (h == null) return null;
+    return Number(h);
   }
   // ZEC / KAS: the pool wallet API reports the ACTUAL landing hashrate.
   const data = await fetchPoolAccount(pool);

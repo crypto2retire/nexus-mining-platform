@@ -20,10 +20,10 @@ const DISCOUNT_LADDER = {
 /** Number of distinct coins the user owns a miner for (rig rows). */
 async function coinsOwnedFor(queryable, userId) {
   const { rows } = await queryable.query(
-    // Only purchasable marketplace rooms count — the XMR self-mined demo pool
-    // was removed 2026-08-19, so XMR rigs are excluded from the loyalty count.
+    // All four purchasable marketplace rooms count (XMR re-added 2026-08-20
+    // as a rental-backed room).
     `SELECT COUNT(*) AS c FROM virtual_rigs
-      WHERE user_id = $1 AND target_pool IN ('ZCASH', 'KASPA', 'LTC_DOGE')`,
+      WHERE user_id = $1 AND target_pool IN ('ZCASH', 'KASPA', 'LTC_DOGE', 'XMR')`,
     [userId]
   );
   const c = Number(rows[0]?.c);

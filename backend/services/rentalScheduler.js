@@ -10,8 +10,7 @@
  * Loop per tick (every RENTAL_SCHEDULER_INTERVAL_MS, default 15 min):
  *   1. Fetch MRR's active rental list; mark any rig_rentals ACTIVE rows whose
  *      rental is gone as ENDED.
- *   2. For each ACTIVE virtual rig in a marketplace pool (ZCASH/KASPA/LTC_DOGE;
- *      XMR is self-mined — never rented):
+ *   2. For each ACTIVE virtual rig in a marketplace pool (ZCASH/KASPA/LTC_DOGE/XMR):
  *      a. Skip if it already has an ACTIVE rental backing it.
  *      b. available = SUM(maintenance_fee_ledger) - SUM(rig_rentals.cost_usd)
  *         for this user+pool. That is the rig's own mining fund.
@@ -141,12 +140,12 @@ async function runSchedulerOnce() {
     );
     let remainingCapUsd = DAILY_CAP_USD - Number(spent.rows[0]?.total || 0);
 
-    // 4. Rigs that need real backing. XMR is self-mined — never rented.
+    // 4. Rigs that need real backing. All four rooms are rental-backed.
     const rigs = await client.query(
       `SELECT v.rig_id, v.user_id, v.target_pool, v.virtual_hashrate, v.level, v.mine_at_loss
-         FROM virtual_rigs v
-        WHERE v.maintenance_status = 'ACTIVE'
-          AND v.target_pool IN ('ZCASH', 'KASPA', 'LTC_DOGE')`
+        FROM virtual_rigs v
+       WHERE v.maintenance_status = 'ACTIVE'
+         AND v.target_pool IN ('ZCASH', 'KASPA', 'LTC_DOGE', 'XMR')`
     );
 
     for (const rig of rigs.rows) {

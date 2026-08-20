@@ -51,6 +51,7 @@ describe('buildBacking', () => {
     process.env.MRR_PLATFORM_WALLET_KAS = 'kaspa:test';
     process.env.MRR_PLATFORM_WALLET_LTC = 'ltc1test';
     process.env.MRR_PLATFORM_WALLET_DOGE = 'dtest';
+    process.env.XMR_WALLET_ADDRESS = '4test';
   });
 
   beforeEach(() => {
@@ -69,6 +70,15 @@ describe('buildBacking', () => {
       if (url.includes('blockcypher.com')) {
         return { data: { balance: 0 } };
       }
+      if (url.includes('monero.herominers.com')) {
+        // herominers stats_address: unpaid balance in atomic units (1e12),
+        // hashrate_24h in H/s.
+        return {
+          data: {
+            stats: { balance: '274144378', hashrate_24h: 2691.67 },
+          },
+        };
+      }
       return { data: {} };
     });
 
@@ -85,6 +95,13 @@ describe('buildBacking', () => {
     expect(backing.KASPA.pool_unpaid).toBeCloseTo(1.2059, 4);
     expect(backing.KASPA.pool_unpaid_unit).toBe('KAS');
     expect(backing.KASPA.mined_total).toBe(1.2345);
+
+    // XMR: hashrate_24h in H/s, unpaid scaled from herominers atoms.
+    expect(backing.XMR.virtual_ghs).toBe(0);
+    expect(backing.XMR.real_hash).toBeCloseTo(2691.67, 2);
+    expect(backing.XMR.real_unit).toBe('H/s');
+    expect(backing.XMR.pool_unpaid).toBeCloseTo(0.000274144378, 12);
+    expect(backing.XMR.pool_unpaid_unit).toBe('XMR');
   });
 
   it('uses MRR rental averages for LTC real hashrate', async () => {
@@ -119,6 +136,7 @@ describe('getBacking cache', () => {
     process.env.MRR_PLATFORM_WALLET_KAS = 'kaspa:test';
     process.env.MRR_PLATFORM_WALLET_LTC = 'ltc1test';
     process.env.MRR_PLATFORM_WALLET_DOGE = 'dtest';
+    process.env.XMR_WALLET_ADDRESS = '4test';
   });
 
   beforeEach(() => {

@@ -6,21 +6,25 @@ const { distributePayout, distributeMergedReward } = require('./rewardDistributo
  * Payout trigger — watches the platform mining wallets at their pools and
  * automatically distributes newly-landed coins to players via distributePayout.
  *
- * Detection modes (all endpoints verified reachable 2026-08-19):
+ * Detection modes (all endpoints verified reachable 2026-08-20):
  *   balance-delta : ZEC/KAS at 2Miners — the accounts API `stats.balance`
  *                   field is the wallet's unpaid balance. An increase = a
  *                   payout landed; the delta is the payout amount. A decrease
  *                   means the operator moved coins — baseline resets, no event.
+ *   unpaid-drop   : XMR at herominers — the API exposes UNPAID balance only.
+ *                   When unpaid crosses the pool minimum (0.1 XMR) and then
+ *                   drops, the pool paid out; the drop is the payout amount.
+ *                   (XMR re-added 2026-08-20 as a rental-backed room; the
+ *                   platform XMR wallet has been earning at herominers.)
  *
  * LTC_DOGE uses Blockcypher (F2Pool accepts bech32 workers — stratum-verified
  * — but its stats page can't look up ltc1... addresses).
- *
- * (The XMR self-mined demo pool was REMOVED 2026-08-19 — no XMR watch.)
  *
  * State persists in payout_watch so restarts never double-distribute.
  */
 
 const INTERVAL_MS = Number(process.env.PAYOUT_CHECK_INTERVAL_MS || 600000); // 10 min
+const XMR_MIN_PAYOUT = Number(process.env.XMR_MIN_PAYOUT || 0.1);
 const EPS = 1e-8;
 
 const WATCHES = {
@@ -44,6 +48,20 @@ const WATCHES = {
     statsUrl: 'https://kas.2miners.com/api/stats',
     balanceOf: (d) => Number(d?.stats?.balance ?? d?.balance ?? 0),
     netHashOf: (d) => Number(d.nodes?.[0]?.networkhashps) || null,
+  },
+  XMR: {
+    mode: 'unpaid-drop',
+    walletEnv: 'XMR_WALLET_ADDRESS',
+    accountUrl: (addr) => `https://monero.herominers.com/api/stats_address?address=${addr}`,
+    statsUrl: null,
+    balanceOf: (d) => {
+      // stats.balance = the wallet's UNPAID pool balance in atomic units
+      // (1 XMR = 1e12). Verified 2026-08-20: the API's `unlocked` array
+      // entries are colon-separated STRINGS, not objects — summing r.amount
+      // over them always returned 0, so XMR payouts were never detected.
+      return Number(d?.stats?.balance || 0) / 1e12;
+    },
+    netHashOf: () => null,
   },
   LTC_DOGE: {
     // F2Pool accepts bech32 workers for MINING (stratum-authorize verified
@@ -105,6 +123,9 @@ async function fetchNetworkHashrate(poolKey) {
  *
  * balance-delta mode (ZEC/KAS): increase = payout (the delta), decrease =
  * operator moved coins → reset baseline.
+ * unpaid-drop mode (XMR): unpaid grows as earnings accrue — only a LARGE drop
+ * (after reaching the pool minimum) means the pool paid out; anything else is
+ * accrual noise.
  */
 function computePayoutEvent(last, current, { minDrop = 0 } = {}) {
   const round8 = (n) => Math.round(n * 1e8) / 1e8;
@@ -156,7 +177,7 @@ async function checkPool(poolKey) {
   const row = await pool.query('SELECT last_balance FROM payout_watch WHERE pool = $1', [poolKey]);
   const last = row.rowCount > 0 ? Number(row.rows[0].last_balance) : null;
 
-  const minDrop = 0; // all watches are balance-delta; XMR unpaid-drop was removed
+  const minDrop = cfg.mode === 'unpaid-drop' ? XMR_MIN_PAYOUT : 0;
   const event = computePayoutEvent(last, balance, { minDrop });
 
   if (event.action === 'baseline') {
@@ -224,11 +245,13 @@ async function getPayoutStatus() {
   return {
     last_run: lastRun,
     interval_ms: INTERVAL_MS,
+    xmr_min_payout: XMR_MIN_PAYOUT,
     wallets: {
       ZCASH: process.env.MRR_PLATFORM_WALLET_ZEC ? 'set' : 'unset',
       KASPA: process.env.MRR_PLATFORM_WALLET_KAS ? 'set' : 'unset',
       LTC_DOGE: process.env.MRR_PLATFORM_WALLET_LTC ? 'set' : 'unset',
       LTC_DOGE_DOGE: process.env.MRR_PLATFORM_WALLET_DOGE ? 'set' : 'unset',
+      XMR: process.env.XMR_WALLET_ADDRESS ? 'set' : 'unset',
     },
     watches: rows,
   };

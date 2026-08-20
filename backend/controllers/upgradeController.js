@@ -22,14 +22,23 @@ function getRenter() {
  * that hashrate on the marketplace (rental $/day differs hugely per coin).
  * Virtual hashrate ladder is the same everywhere; only the price differs.
  *
- *   KASPA (cheap to back):       $5 / $10 / $25 / $50
+ *   KASPA/XMR (cheap to back):  $5 / $10 / $25 / $50
  *   ZCASH (mid):                 $20 / $40 / $100 / $200
  *   LTC_DOGE (expensive rigs):   $50 / $120 / $300 / $750
  *
- * (XMR self-mined demo pool REMOVED 2026-08-19 — no XMR room.)
+ * (XMR re-added 2026-08-20 as a RENTAL-backed room — RandomX rigs on MRR
+ *  rent around $42-44/MH·day with plenty of availability, so it prices like
+ *  KASPA, the other cheap-to-back room. It is NOT the old self-mined demo.)
  */
 const POOL_TIERS = {
   KASPA: [
+    { level: 1, cost: 0, hashrate: 10 },
+    { level: 2, cost: 5, hashrate: 25 },
+    { level: 3, cost: 10, hashrate: 60 },
+    { level: 4, cost: 25, hashrate: 150 },
+    { level: 5, cost: 50, hashrate: 400 },
+  ],
+  XMR: [
     { level: 1, cost: 0, hashrate: 10 },
     { level: 2, cost: 5, hashrate: 25 },
     { level: 3, cost: 10, hashrate: 60 },
@@ -106,7 +115,7 @@ async function upgradeRig(req, res) {
     return res.status(400).json({ error: 'request_id is required (1-64 chars) for idempotent upgrades' });
   }
 
-  if (!['ZCASH', 'KASPA', 'LTC_DOGE'].includes(targetPool)) {
+  if (!['ZCASH', 'KASPA', 'LTC_DOGE', 'XMR'].includes(targetPool)) {
     return res.status(400).json({ error: 'Invalid target pool' });
   }
 
@@ -463,7 +472,7 @@ async function reinvestRig(req, res) {
     return res.status(400).json({ error: 'request_id is required (1-64 chars) for idempotent upgrades' });
   }
 
-  if (!['ZCASH', 'KASPA', 'LTC_DOGE'].includes(targetPool)) {
+  if (!['ZCASH', 'KASPA', 'LTC_DOGE', 'XMR'].includes(targetPool)) {
     return res.status(400).json({ error: 'Invalid target pool' });
   }
 
@@ -560,7 +569,7 @@ async function setMineAtLoss(req, res) {
   if (!walletAddress || !/^0x[a-f0-9]{40}$/i.test(walletAddress)) {
     return res.status(400).json({ error: 'Valid wallet address is required' });
   }
-  if (!['ZCASH', 'KASPA', 'LTC_DOGE'].includes(targetPool)) {
+  if (!['ZCASH', 'KASPA', 'LTC_DOGE', 'XMR'].includes(targetPool)) {
     return res.status(400).json({ error: 'Invalid target pool' });
   }
 

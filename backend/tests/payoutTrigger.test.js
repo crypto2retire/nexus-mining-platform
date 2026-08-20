@@ -33,6 +33,24 @@ describe('2Miners watches (ZEC/KAS) — stats.balance fix', () => {
   });
 });
 
+describe('XMR herominers watch (rental-backed room, re-added 2026-08-20)', () => {
+  test('XMR watches the platform wallet via unpaid-drop mode', () => {
+    const cfg = WATCHES.XMR;
+    expect(cfg).toBeTruthy();
+    expect(cfg.mode).toBe('unpaid-drop');
+    expect(cfg.walletEnv).toBe('XMR_WALLET_ADDRESS');
+    expect(cfg.accountUrl('4test')).toContain('monero.herominers.com/api/stats_address');
+  });
+
+  test('XMR balanceOf scales herominers atomic units (1 XMR = 1e12)', () => {
+    const cfg = WATCHES.XMR;
+    // Verified live 2026-08-20: stats.balance = "274144378" (atomic units).
+    expect(cfg.balanceOf({ stats: { balance: '274144378' } })).toBeCloseTo(0.000274144378, 12);
+    // The unlocked array is colon-separated strings — never summed.
+    expect(cfg.balanceOf({ stats: { balance: '0' } })).toBe(0);
+  });
+});
+
 describe('computePayoutEvent (payout trigger decision logic)', () => {
   test('no baseline → baseline (no event)', () => {
     expect(computePayoutEvent(null, 5)).toEqual({ action: 'baseline' });

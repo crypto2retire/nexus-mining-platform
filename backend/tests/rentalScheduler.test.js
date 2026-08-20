@@ -17,7 +17,7 @@ jest.mock('../services/mrrRenter', () => ({
   isLiveMode: jest.fn(),
   makeMrrRequest: jest.fn(),
   findAffordableRig: jest.fn(),
-  POOL_ALGORITHM_MAP: { ZCASH: 'ZHASH', KASPA: 'KHEAVYHASH', LTC_DOGE: 'SCRYPT' },
+  POOL_ALGORITHM_MAP: { ZCASH: 'ZHASH', KASPA: 'KHEAVYHASH', LTC_DOGE: 'SCRYPT', XMR: 'RANDOMX' },
 }));
 
 const { pool } = require('../config/db');

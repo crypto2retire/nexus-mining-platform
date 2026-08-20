@@ -50,8 +50,7 @@ export default function GetStarted({ depositAddress }) {
               <strong>Buy a miner.</strong> Click <strong>Upgrade Rig</strong> on any room card. You
               own the miner and its hashrate permanently. Entry prices follow real mining costs —
               Kaspa and Monero start at <strong>$5</strong>, Zcash at <strong>$20</strong>,
-              Litecoin at <strong>$50</strong>. The <strong>Monero (XMR)</strong> room is powered by
-              the platform's own miner, so it's the free way to get started.
+              Litecoin at <strong>$50</strong>.
             </li>
             <li>
               <strong>Earn — after maintenance.</strong> Like a real miner, your rig pays its own

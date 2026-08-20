@@ -7,14 +7,14 @@ jest.mock('../services/priceOracle', () => ({
 jest.mock('../services/hashrateRenter', () => ({
   placeHashpowerOrder: jest.fn(),
   getOrderStatus: jest.fn(),
-  POOL_ALGORITHM_MAP: { ZCASH: 'ZHASH', KASPA: 'KHEAVYHASH', LTC_DOGE: 'SCRYPT' },
+  POOL_ALGORITHM_MAP: { ZCASH: 'ZHASH', KASPA: 'KHEAVYHASH', LTC_DOGE: 'SCRYPT', XMR: 'RANDOMX' },
   PROVIDER_NAME: 'NICEHASH',
   LIVE_ORDERS_ENV: 'NICEHASH_LIVE_ORDERS',
 }));
 jest.mock('../services/mrrRenter', () => ({
   placeHashpowerOrder: jest.fn(),
   getOrderStatus: jest.fn(),
-  POOL_ALGORITHM_MAP: { ZCASH: 'ZHASH', KASPA: 'KHEAVYHASH', LTC_DOGE: 'SCRYPT' },
+  POOL_ALGORITHM_MAP: { ZCASH: 'ZHASH', KASPA: 'KHEAVYHASH', LTC_DOGE: 'SCRYPT', XMR: 'RANDOMX' },
   PROVIDER_NAME: 'MRR',
   LIVE_ORDERS_ENV: 'MRR_LIVE_ORDERS',
 }));
@@ -348,6 +348,15 @@ describe('upgradeRig — currency conversion + order loop', () => {
     expect(res2.body.protocol_fee_usdc).toBe(2.5);
     expect(res2.body.btc_spent).toBe(0.000475);
     expect(placeHashpowerOrder).toHaveBeenCalledWith('LTC_DOGE', 0.000475);
+
+    // XMR tier 2 = $5 (rental-backed room, re-added 2026-08-20 — cheap to
+    // back like KASPA). Fee 5% = 0.25. Net 4.75 / 100000 = 0.0000475 BTC.
+    const res3 = makeRes();
+    await upgradeRig(req({ target_pool: 'XMR', request_id: 'req-xmr-1' }), res3);
+    expect(res3.body.success).toBe(true);
+    expect(res3.body.protocol_fee_usdc).toBe(0.25);
+    expect(res3.body.btc_spent).toBe(0.0000475);
+    expect(placeHashpowerOrder).toHaveBeenCalledWith('XMR', 0.0000475);
   });
 
   test('MRR live order: books the ACTUAL rental cost and credits the buy-in as the rig maintenance fund (GoMiner 010 accounting)', async () => {

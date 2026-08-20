@@ -14,7 +14,7 @@ jest.mock('../services/priceOracle', () => ({
 jest.mock('../services/hashrateRenter', () => ({
   placeHashpowerOrder: jest.fn(),
   getOrderStatus: jest.fn(),
-  POOL_ALGORITHM_MAP: { ZCASH: 'ZHASH', KASPA: 'KHEAVYHASH', LTC_DOGE: 'SCRYPT' },
+  POOL_ALGORITHM_MAP: { ZCASH: 'ZHASH', KASPA: 'KHEAVYHASH', LTC_DOGE: 'SCRYPT', XMR: 'RANDOMX' },
   PROVIDER_NAME: 'NICEHASH',
   LIVE_ORDERS_ENV: 'NICEHASH_LIVE_ORDERS',
 }));
