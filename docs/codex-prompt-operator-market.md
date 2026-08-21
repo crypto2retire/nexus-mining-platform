@@ -42,8 +42,15 @@ x-api-nonce/x-api-key/x-api-sign; base https://www.miningrigrentals.com/api/v2)
   - algo values: `kheavyhash`, `scrypt`, `equihash`, `randomx`.
 - **GET /info/algos** — aggregate stats per algo (available rigs/hash,
   prices lowest/last_10/last_20/last_30) for the market header.
-- **POST /rig/{id}** — rent a rig. Body: `{ length: <hours>, profileid: <id> }`
-  (documented in `backend/services/mrrRenter.js` header comment).
+- **POST /rig/{id}** — NOT the order contract. **The REAL, tested MRR order
+  contract is `PUT /rental` with body
+  `{ rig: <rigId>, length: <hours>, profile: <profileId>, currency: 'BTC' }`**
+  (verified in `backend/services/mrrRenter.js` `placeHashpowerOrder` line
+  ~346 — the file header comment saying `POST /rig/{id}` is STALE; trust the
+  code). The body already accepts a specific `rig` id — the existing flow just
+  fills it from `findAffordableRig(budget)` instead of a user choice.
+  Response: `data.rental.id` = order id, `data.rental.price.paid` = actual BTC
+  cost (both already parsed by `placeHashpowerOrder`).
 - Pool profile env vars (already set): `MRR_POOL_PROFILE_EQUIHASH`,
   `MRR_POOL_PROFILE_KHEAVYHASH`, `MRR_POOL_PROFILE_SCRYPT`,
   `MRR_POOL_PROFILE_RANDOMX` — pass the matching profileid per algorithm.
@@ -119,16 +126,44 @@ Routes (all behind `requireAuth` from `../middleware/auth`):
   - Gate: same OPERATOR_WALLET check.
   - `length_hours` must be >= rig `min_rental_length` and <=
     `MRR_MAX_RENTAL_HOURS` (default 72, env).
-  - **MUST go through the order outbox pipeline** (crash-safety — see
-    `backend/services/orderOutboxWorker.js` and `hashrate_orders` table from
-    migration 021): insert a `hashrate_orders` row (status PENDING,
-    marketplace 'MRR', algorithm = the algo's uppercase room name
-    (KASPA/ZCASH/LTC_DOGE/XMR — match existing convention), requested rig id,
-    length_hours, profileid from the env map, operator wallet as the user).
-    Do NOT debit USDC, do NOT charge a protocol fee, do NOT create the rig or
-    capacity slice inline — the outbox worker already handles placement and
-    activates the rig + RENTAL slice + rig_rentals row on success (reuse
-    exactly that path; the worker must not require a USDC balance).
+  - **MIGRATION 024 IS APPROVED (operator-orders fields only — Kevin
+    2026-08-21, after Codex flagged the schema conflict).** New file
+    `database/migrations/024_operator_orders.sql` (idempotent, additive,
+    NULL-able — zero impact on existing rows/flow):
+    ```sql
+    ALTER TABLE hashrate_orders
+      ADD COLUMN IF NOT EXISTS requested_rig_id VARCHAR(50),
+      ADD COLUMN IF NOT EXISTS pool_profile_id VARCHAR(20),
+      ADD COLUMN IF NOT EXISTS requested_length_hours INT;
+    CREATE INDEX IF NOT EXISTS idx_hashrate_orders_requested_rig
+      ON hashrate_orders (requested_rig_id);
+    ```
+    Rationale (all verified against the live schema 2026-08-21): migration 021
+    stores `requested_rig_level`/`requested_rig_hashrate` (budget/ladder) but
+    NOT the exact MRR rig id or pool profile; the outbox worker calls
+    `placeHashpowerOrder` which picks the rig by budget via `findAffordableRig`
+    — the operator's exact selection cannot survive without these columns. Do
+    NOT overload existing columns (`rig_name`/`rig_rpi` are audit after the
+    fact; `nicehash_order_id` is marketplace-specific).
+  - Insert the `hashrate_orders` row (status PENDING, marketplace 'MRR',
+    algorithm = the algo's uppercase room name (KASPA/ZCASH/LTC_DOGE/XMR),
+    **`requested_rig_id = rig_id`, `pool_profile_id` = the env profile for the
+    algo, `requested_length_hours = length_hours`**, operator wallet as the
+    user, `btc_spent = 0` — the actual cost is recorded post-placement from
+    MRR `price.paid` into `rig_rentals.cost_btc` as today). Do NOT debit
+    USDC, do NOT charge a protocol fee, do NOT create the rig or capacity
+    slice inline — the outbox worker handles placement + activation on
+    success (reuse that path; the worker must not require a USDC balance).
+  - **Worker exact-rig path**: extend `placeHashpowerOrder(targetPool,
+    spendBtcAmount)` with an optional override
+    `{ rigId, lengthHours, profileId }`. When `rigId` is provided: SKIP
+    `findAffordableRig` (do a light availability check via
+    `GET /rig?type=<algo>` filtered to that id — must be available/online/not
+    rented, else FAILED → refund path), and call the SAME tested
+    `PUT /rental {rig: rigId, length: lengthHours, profile: profileId,
+    currency: 'BTC'}`. When no override: existing budget flow unchanged.
+    The worker reads the override from the order row
+    (`requested_rig_id`/`requested_length_hours`/`pool_profile_id`).
   - Return `202 { status: 'PENDING', order_id }` (same shape the existing
     upgrade endpoint returns) so the frontend can poll.
 
@@ -173,8 +208,11 @@ deposits, the game, or the player USDC flow.
 
 ## Constraints
 
-- No migrations. No new npm dependencies. No randomness. No fabricated
-  numbers — every figure comes from the live MRR API and the price oracle.
+- **One migration only: 024_operator_orders.sql (approved — spec above).**
+  Do NOT touch migrations 001–023 or any other table. Do NOT overload
+  existing hashrate_orders columns. No new npm dependencies. No randomness.
+  No fabricated numbers — every figure comes from the live MRR API, the price
+  oracle, and the observed-production anchors.
 - Do NOT touch: player USDC purchase flow (upgradeRig/buySession), rewards,
   deposits, withdrawals, the game (023), auth, migrations 001–023.
 - Keep the full test suite green (currently 161 tests) + `npm run build` +
@@ -184,8 +222,11 @@ deposits, the game, or the player USDC flow.
   (pure function: anchor scaling → revenue_day, net_day, ±10/±25 scenarios,
   break-even price = spot × cost/revenue, per-length totals — assert exact
   numbers for a KAS 200 GH/s rig: 1.3832 KAS/day × spot, and a ZEC z9-class
-  rig at the 57%-delivery anchor)**, and the order insert (PENDING row, no
-  USDC debit, worker path mocked).
+  rig at the 57%-delivery anchor)**, and the order insert + worker exact-rig
+  path (PENDING row with requested_rig_id/pool_profile_id/requested_length_hours,
+  no USDC debit, `placeHashpowerOrder` override places `PUT /rental` with the
+  EXACT rig id when requested_rig_id is set and falls back to the budget flow
+  when NULL — both mocked).
 - Do NOT commit, do NOT deploy, do NOT restart anything.
 
 ## Operator note (paste-ready for Kevin)
