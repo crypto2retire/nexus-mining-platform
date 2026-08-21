@@ -12,6 +12,89 @@
 
 ---
 
+## REVISION 2 (Aug 21, 2026) — corrections adopted from legal review
+
+A second review corrected several conclusions in the original memo. Adopted
+verbatim in substance:
+
+1. **"Room 1" is NOT fully non-custodial as originally described.** The flow
+   `User → Nexus → MRR/NiceHash` (user pays Nexus, Nexus purchases the rental)
+   is still an intermediary payment flow — FinCEN may examine it as accepting
+   and transmitting value even though no coins later flow back through Nexus.
+   The cleanest flow is:
+   ```
+   User → MRR/NiceHash directly   (user owns the marketplace account + order)
+   User → Nexus service fee separately
+   Pool → User wallet directly
+   ```
+   Nexus should hold **limited API authority to configure** the rental (no
+   withdrawal permission). A second-best model is Nexus selling a complete
+   **fixed-price mining service as principal** (one fixed price, Nexus procures
+   compute, delivers hashpower to the user's pool endpoint) — that supports a
+   merchant/service argument but is still a cloud-mining product needing specific
+   legal analysis, and must NOT be described as "facilitating" someone else's
+   rental.
+2. **"Session markups are pure platform margin" is economically true but
+   legally wrong as stated.** If a user pays for a session and receives whatever
+   crypto a rig generates, that is still a cloud-mining service — direct pool
+   payment removes custody but does NOT automatically remove the
+   investment-contract question. Sell sessions as: a specific quantity of
+   hashpower, a specific algorithm and duration, a disclosed pool destination,
+   no promised revenue, no managed reinvestment, no pooled performance, no
+   representation that the purchase will recover its cost. **Measureable
+   compute — not an income product.**
+3. **"Platform-owned production is 100% legal" is too absolute.** Correct
+   language: *lower regulatory risk*. Legality still depends on marketplace and
+   hosting terms, state/local rules, tax and accounting treatment, sanctions
+   exposure, how coins are sold, environmental/utility rules, and whether
+   production supports prizes or promised returns.
+4. **"Funded from platform revenue" does not by itself make a sweepstakes
+   lawful.** A sweepstakes must have a genuine free method of entry; purchases
+   must not improve odds; free and paid entrants must be treated equivalently;
+   official rules must state eligibility, odds, prizes, dates; prohibited states
+   must be excluded; required registrations/bonds handled; and the game must be
+   visually and operationally separated from rental purchases. If streaks,
+   referrals, or rental purchases increase jackpot odds, the separation fails.
+5. **Green United is distinguishable, not a death sentence.** It involved
+   alleged fake mining (boxes that didn't mine the promised token), expected
+   token appreciation, promoter-managed operations, and return claims. Nexus
+   improves its position when: real hashpower is demonstrably delivered, the
+   user controls the rental and pool destination, rewards come from the genuine
+   network, Nexus makes no token/appreciation promises, Nexus does not pool
+   returns, and marketing emphasizes service specifications and risks.
+6. **The P/L paragraph was NOT supportable as written.** Corrected below with
+   live data and explicit provenance.
+
+### Corrected live P/L (Aug 21, 2026, ~03:30 UTC — data as of read time)
+
+Sources: live pool unpaid balances (2Miners/HeroMiners), F2Pool settlement
+screenshot, `rig_rentals.cost_btc` from the deployment DB, CoinGecko prices at
+read time. **This is a read-time snapshot, NOT a settled reconciliation — do not
+use in investor/legal/strategy documents until rental costs are reconciled
+against pool earnings at contemporaneous prices.**
+
+| Room | Mined/day (live) | Rental cost/day | P/L/day |
+|---|---|---|---|
+| ZEC | $1.64 | $2.77 (z9 $2.12 + test $0.65) | **−$1.13** |
+| XMR | $0.12 | $0.69 | **−$0.57** |
+| KAS | $0.07 | $0.08 | **−$0.01** |
+| LTC+DOGE | $3.79 *extrapolated* | $3.76 | **+$0.03** *(unverified)* |
+| **TOTAL** | $5.61 | $7.29 | **−$1.68/day** |
+
+Caveats:
+- LTC/DOGE is **extrapolated from a partial F2Pool settlement** (~7.7h of full
+  rate; no on-chain payout has ever landed) — treat as unverified.
+- ZEC test rig (#5699114) ends Aug 21 05:19 UTC; after that ZEC cost drops to
+  $2.12/day → ZEC ≈ −$0.48/day.
+- XMR unpaid is small and noisy (rig started Aug 20 04:29); hashrate 12 KH/s.
+- KAS unpaid 3.03 KAS over ~31h → ~2.34 KAS/day ≈ $0.07/day.
+
+**The fleet is net-negative at current prices/difficulty.** This is exactly why
+the strategy matters: mining spread is NOT the business — service fees,
+company-owned mining, and the game layer are.
+
+---
+
 ## 1. THE BIG PICTURE (plain English)
 
 The platform as currently designed sits under **four separate regulatory lenses**,
