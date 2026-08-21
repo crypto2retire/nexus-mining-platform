@@ -61,8 +61,10 @@ describe('buildBacking', () => {
 
   it('combines virtual capacity, active rentals, live pool hashrate and unpaid', async () => {
     axios.get.mockImplementation(async (url) => {
-      if (url.includes('kas.2miners.com')) {
-        return { data: twoMiners(120591854, 207685529691) }; // 1.2059 KAS unpaid, 207.7 GH/s
+      if (url.includes('kaspa.herominers.com')) {
+        return {
+          data: { stats: { balance: '120591854', hashrate_1h: '207685529691' } },
+        }; // 1.2059 KAS unpaid, 207.7 GH/s
       }
       if (url.includes('zec.2miners.com')) {
         return { data: twoMiners(0, 0) };

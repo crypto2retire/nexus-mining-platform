@@ -16,15 +16,15 @@ describe('DOGE merged watch (011)', () => {
   });
 });
 
-describe('2Miners watches (ZEC/KAS) — stats.balance fix + ATOM normalization (015)', () => {
+describe('pool watches (2Miners ZEC / HeroMiners KAS) — balance normalization (015)', () => {
   test('KASPA balanceOf reads stats.balance and normalizes atoms → KAS', () => {
     const cfg = WATCHES.KASPA;
-    // Verified live 2026-08-19: the account API has NO top-level `balance`.
-    // stats.balance is ATOMS (1 KAS = 1e8) — normalize to coin units so the
+    // HeroMiners stats.balance is sompi (1 KAS = 1e8) — normalize to coin units so the
     // payout ledger never sees 157,240,000 "KAS" (numeric overflow bug).
     const bal = cfg.balanceOf({ stats: { balance: '125011636' } });
     expect(bal).toBeCloseTo(1.25011636, 8);
     expect(bal).not.toBe(0); // the old Number(d.balance) returned 0 forever
+    expect(cfg.accountUrl('kaspa:test')).toContain('kaspa.herominers.com/api/stats_address');
   });
 
   test('ZCASH balanceOf reads stats.balance (normalized) with a top-level fallback', () => {
@@ -39,7 +39,7 @@ describe('2Miners watches (ZEC/KAS) — stats.balance fix + ATOM normalization (
     // wallet — balance-delta would fire a bogus payout on every accrual.
     expect(WATCHES.KASPA.mode).toBe('unpaid-drop');
     expect(WATCHES.ZCASH.mode).toBe('unpaid-drop');
-    expect(WATCHES.KASPA.minPayout).toBe(50);
+    expect(WATCHES.KASPA.minPayout).toBe(1);
     expect(WATCHES.ZCASH.minPayout).toBeCloseTo(0.1, 4); // 2Miners live config: 1e7 zatoshi
   });
 });

@@ -26,7 +26,7 @@ const WALLET_ENV = {
 
 const ACCOUNT_URL = {
   ZCASH: (addr) => `https://zec.2miners.com/api/accounts/${addr}`,
-  KASPA: (addr) => `https://kas.2miners.com/api/accounts/${addr}`,
+  KASPA: (addr) => `https://kaspa.herominers.com/api/stats_address?address=${addr}`,
   XMR: (addr) => `https://monero.herominers.com/api/stats_address?address=${addr}`,
   LTC_DOGE: null, // handled via MRR rental averages below
 };
@@ -109,7 +109,13 @@ async function fetchLiveRealHash(pool, activeRentals = []) {
     if (h == null) return null;
     return Number(h);
   }
-  // ZEC / KAS: the pool wallet API reports the ACTUAL landing hashrate.
+  if (pool === 'KASPA') {
+    const data = await fetchPoolAccount(pool);
+    const h = data?.stats?.hashrate_1h ?? data?.stats?.hashrate ?? data?.stats?.hashrate_24h;
+    if (h == null) return null;
+    return Number(h) / 1e9; // H/s -> GH/s
+  }
+  // ZEC fallback: the pool wallet API reports the ACTUAL landing hashrate.
   const data = await fetchPoolAccount(pool);
   if (!data || data.currentHashrate == null) return null;
   const h = Number(data.currentHashrate);

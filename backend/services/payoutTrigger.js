@@ -6,11 +6,10 @@ const { distributePayout, distributeMergedReward, recordPoolPayment } = require(
  * Payout trigger — watches the platform mining wallets at their pools and
  * automatically distributes newly-landed coins to players via distributePayout.
  *
- * Detection modes (all endpoints verified reachable 2026-08-20):
- *   balance-delta : ZEC/KAS at 2Miners — the accounts API `stats.balance`
+ * Detection modes (pool endpoints verified reachable 2026-08-21):
+ *   unpaid-drop   : ZEC at 2Miners and KAS at HeroMiners — each accounts API `stats.balance`
  *                   field is the wallet's unpaid balance. An increase = a
- *                   payout landed; the delta is the payout amount. A decrease
- *                   means the operator moved coins — baseline resets, no event.
+ *                   balance accrual; a qualifying drop means the pool paid.
  *   unpaid-drop   : XMR at herominers — the API exposes UNPAID balance only.
  *                   When unpaid crosses the pool minimum (0.1 XMR) and then
  *                   drops, the pool paid out; the drop is the payout amount.
@@ -28,8 +27,8 @@ const XMR_MIN_PAYOUT = Number(process.env.XMR_MIN_PAYOUT || 0.1);
 const EPS = 1e-8;
 
 // Pool minimum payout thresholds (COIN units) — the amount at which each pool
-// sends the wallet its accrued earnings. Sources verified 2026-08-20:
-//   KASPA 50 KAS    (2Miners, verified live in prior sessions)
+// sends the wallet its accrued earnings. Sources verified through 2026-08-21:
+//   KASPA 1 KAS     (HeroMiners live pool config)
 //   ZCASH 0.1 ZEC   (2Miners live config: allowedMinPayout=minPayout=1e7
 //                    zatoshi = 0.1 ZEC; previously hardcoded 0.01 — wrong)
 //   XMR   0.1 XMR   (herominers, XMR_MIN_PAYOUT env)
@@ -38,7 +37,7 @@ const EPS = 1e-8;
 //          on-chain arrival watch shows the total, no ETA)
 const PAYOUT_MIN = {
   ZCASH: Number(process.env.ZCASH_MIN_PAYOUT || 0.1),
-  KASPA: Number(process.env.KASPA_MIN_PAYOUT || 50),
+  KASPA: Number(process.env.KASPA_MIN_PAYOUT || 1),
   XMR: Number(process.env.XMR_MIN_PAYOUT || 0.1),
   LTC_DOGE: Number(process.env.LTC_MIN_PAYOUT || 0.02),
   LTC_DOGE_DOGE: null,
@@ -60,14 +59,14 @@ const WATCHES = {
     netHashOf: (d) => Number(d.nodes?.[0]?.networkhashps) || null,
   },
   KASPA: {
-    // Same as ZEC: unpaid accrues in atoms, pool pays when it crosses 50 KAS.
+    // HeroMiners: unpaid accrues in sompi, pool pays when it crosses 1 KAS.
     mode: 'unpaid-drop',
     minPayout: PAYOUT_MIN.KASPA,
     walletEnv: 'MRR_PLATFORM_WALLET_KAS',
-    accountUrl: (addr) => `https://kas.2miners.com/api/accounts/${addr}`,
-    statsUrl: 'https://kas.2miners.com/api/stats',
+    accountUrl: (addr) => `https://kaspa.herominers.com/api/stats_address?address=${addr}`,
+    statsUrl: null,
     balanceOf: (d) => Number(d?.stats?.balance ?? d?.balance ?? 0) / 1e8,
-    netHashOf: (d) => Number(d.nodes?.[0]?.networkhashps) || null,
+    netHashOf: () => null,
   },
   XMR: {
     mode: 'unpaid-drop',
