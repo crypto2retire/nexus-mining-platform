@@ -101,3 +101,39 @@ ERG +$0.13/d (marginal, thin volume), RVN −$0.23/d (skip holds; re-entry only
   illiquid mirage. RVN skip valid.
 - Strategic conclusion unchanged: mining is a cost center; the business is
   service fees + the game layer. Weekly re-scan = the alert system.
+
+
+---
+
+## Price + trend addendum (same evening) — report format now includes price & trend
+
+Kevin: "reports should include coin price and trending up/down." Every scan
+from here on carries spot price + 24h/7d change per coin (CoinGecko
+`/coins/markets?price_change_percentage=24h,7d`). Live at read time:
+
+| Coin | Price | 24h | 7d |
+|---|---|---|---|
+| BTC | $78,381 | +8.1% | +24.8% |
+| ZEC | $737.30 | +28.8% | **+49.1%** |
+| XMR | $409.32 | -1.2% | +2.9% |
+| LTC | $53.84 | +12.0% | +23.5% |
+| DOGE | $0.0939 | +17.4% | +34.6% |
+| KAS | $0.02960 | +4.8% | +17.1% |
+| RVN | $0.00342 | +14.2% | +27.9% |
+| ERG | $0.2667 | +10.2% | +29.5% |
+
+**Whole market ripping (BTC +25%/week). Recomputed fleet nets (shown
+arithmetic):**
+
+| Rig | Value today | Cost | Net | 7d trend |
+|---|---|---|---|---|
+| KAS 200 GH/s | 1.3832 KAS x $0.02960 = $0.041 | $0.07 | **-$0.03/d** | +17% up |
+| ZEC z9 | 0.002060 x $737.30 = $1.519 | $1.97 | **-$0.45/d** | +49% up up |
+| XMR CPU | 0.000479 x $409.32 = $0.196 | $0.64 | **-$0.44/d** | +2.9% flat |
+| LTC/DOGE | 0.007304 LTC = $0.393 + 28.69 DOGE = $2.693 to $3.086 | $3.46-3.90 | **-$0.37 to -$0.81/d** | LTC +23%, DOGE +35% up |
+
+**Fleet approx -$1.30 to -$1.74/day** (was -$1.76 to -$2.20 this morning —
+the rally improved every room; ZEC + LTC/DOGE carry the gain). Verdict unchanged
+(nothing profitable yet), but the trend column is now the early-warning: if
+ZEC/DOGE hold this pace, ZEC and LTC/DOGE approach break-even before the
+Aug 23 audit.
