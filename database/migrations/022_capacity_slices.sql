@@ -19,7 +19,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_capacity_slices_one_rental
 INSERT INTO capacity_slices
   (user_id, target_pool, virtual_hashrate, source, starts_at, expires_at)
 SELECT r.user_id, r.target_pool, r.virtual_hashrate, 'RENTAL',
-       COALESCE(r.created_at, CURRENT_TIMESTAMP), r.rental_expires_at
+       COALESCE(r.updated_at, CURRENT_TIMESTAMP), r.rental_expires_at
   FROM virtual_rigs r
  WHERE r.rental_expires_at IS NOT NULL
    AND NOT EXISTS (
