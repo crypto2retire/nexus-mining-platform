@@ -42,3 +42,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_game_rewards_reason_reference
 
 CREATE INDEX IF NOT EXISTS idx_referrals_referrer_wallet
   ON referrals(LOWER(referrer_wallet));
+
+-- Migrations run as the postgres superuser, but the app connects as the
+-- `nexus` role. Align ownership with the rest of the schema (all tables are
+-- owned by nexus) so the game routes do not hit permission denied.
+ALTER TABLE IF EXISTS game_streaks OWNER TO nexus;
+ALTER TABLE IF EXISTS game_rewards_ledger OWNER TO nexus;
+ALTER TABLE IF EXISTS referrals OWNER TO nexus;
