@@ -56,6 +56,32 @@ zero mining-funded budget — it would be funded at a loss.
 4. Owned hardware only makes sense with: a sub-$0.06 power deal (colocation, solar,
    industrial rate) AND/OR higher coin prices — not at home rates.
 
+## DECISION (Kevin, Aug 21 2026): RENTAL-ONLY — no owned hardware
+
+**Decision:** the platform rents hashrate (MRR/NiceHash); it does not buy miners.
+
+**Rationale (Kevin):** buying doesn't make sense unless hosted, and hosting adds
+cost; renting is easier to shift with the market.
+
+**Data supports it:**
+- WhatToMine scan at $0.12/kWh: every ASIC coin the platform mines is net-negative
+  on owned hardware (ZEC −$1.33, DOGE −$4.24, KAS −$4.84, LTC −$9.21/day)
+- Owned loses more than rented at the same power rate (rental prices already
+  include cheap industrial power the operator can't access at home)
+- 72h rental windows = flexibility: switch coins/rigs as the market shifts, no
+  capital lockup, no hardware/power risk
+
+**Implications for the model:**
+- The platform is a **rental-service business**: arrange user-directed rentals
+  (REV-2 model) + optionally mine its own rented capacity
+- Rental prices sit at ≈ EV (sellers price at their own cost), so the mining
+  spread is thin-to-negative — the business is: (a) service fees on user
+  rentals, (b) catching rental-arbitrage windows when coin prices move faster
+  than rental repricing, (c) the game layer
+- **The WhatToMine scan + MRR/NiceHash rental-price tracking is the operational
+  tool**: it detects when any room turns profitable at rental prices, so the
+  platform can shift capacity there (that's the "shift with the market" edge)
+
 ## What this means for strategy
 
 - The game layer must be funded from **service fees and platform margin** (not mining
