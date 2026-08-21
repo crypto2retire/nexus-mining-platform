@@ -1,6 +1,5 @@
 const { pool } = require('../config/db');
 const { getLiveBtcPrice } = require('../services/priceOracle');
-const { logRigChange } = require('../services/rigHistory');
 const { fetchLiveRealHash } = require('../services/roomHash');
 const { fetchCoinUsdPrice, claimPoolRewardsInTx } = require('./rewardsController');
 const { coinsOwnedFor, discountPctFor } = require('../services/multiCoinDiscount');
@@ -134,7 +133,7 @@ async function upgradeRig(req, res) {
   }
 
   const renter = getRenter();
-  const { placeHashpowerOrder, getOrderStatus, POOL_ALGORITHM_MAP } = renter;
+  const { POOL_ALGORITHM_MAP } = renter;
   const providerName = renter.PROVIDER_NAME || 'NICEHASH';
   const liveOrdersEnv = renter.LIVE_ORDERS_ENV || 'NICEHASH_LIVE_ORDERS';
 
@@ -179,7 +178,9 @@ async function upgradeRig(req, res) {
   let discountedCost = null;
   let hadRig = false;
   let prevLevel = null;
+  let prevHashrate = null;
   let prevExpiresAt = null;
+  let prevStartsAt = null;
 
   try {
     await client.query('BEGIN');
@@ -193,6 +194,19 @@ async function upgradeRig(req, res) {
       return res.status(404).json({ error: 'User not found' });
     }
     userId = userResult.rows[0].user_id;
+
+    const pendingOrder = await client.query(
+      `SELECT order_id FROM hashrate_orders
+        WHERE user_id = $1 AND target_pool = $2
+          AND marketplace <> 'SESSION'
+          AND outbox_state IN ('PENDING', 'PROCESSING')
+        FOR UPDATE`,
+      [userId, targetPool]
+    );
+    if (pendingOrder.rowCount > 0) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'A rental order for this pool is already pending' });
+    }
 
     // Multi-coin loyalty: more coins mined = cheaper everything.
     const coinsOwned = await coinsOwnedFor(client, userId);
@@ -212,7 +226,14 @@ async function upgradeRig(req, res) {
     const rig = rigResult.rows[0];
     hadRig = !!rig;
     prevLevel = rig ? rig.level : null;
-    prevExpiresAt = rig ? rig.rental_expires_at : null;
+    prevHashrate = rig ? rig.virtual_hashrate : null;
+    const rentalSlice = await client.query(
+      `SELECT virtual_hashrate, starts_at, expires_at FROM capacity_slices
+        WHERE user_id = $1 AND target_pool = $2 AND source = 'RENTAL' FOR UPDATE`,
+      [userId, targetPool]
+    );
+    prevExpiresAt = rentalSlice.rows[0]?.expires_at || null;
+    prevStartsAt = rentalSlice.rows[0]?.starts_at || null;
     const currentLevel = rig ? rig.level : 1;
 
     // RENTAL model (2026-08-20): renew = same tier again (extend window);
@@ -239,8 +260,11 @@ async function upgradeRig(req, res) {
     const orderInsert = await client.query(
       `INSERT INTO hashrate_orders
         (user_id, target_pool, request_id, usdc_cost, protocol_fee_usdc, btc_spent,
-         btc_spot_price, price_feed, price_is_usdc_pair, algorithm, status, marketplace)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'PENDING', $11)
+         btc_spot_price, price_feed, price_is_usdc_pair, algorithm, status, marketplace,
+         outbox_state, prior_rig_level, prior_rig_hashrate, prior_rental_expires_at,
+         prior_rental_starts_at, created_rig, renewal, requested_rig_level, requested_rig_hashrate)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'PENDING', $11,
+              'PENDING', $12, $13, $14, $15, $16, $17, $18, $19)
       ON CONFLICT (request_id) DO NOTHING
       RETURNING order_id`,
       [
@@ -255,6 +279,14 @@ async function upgradeRig(req, res) {
         quote.isUsdcPair,
         POOL_ALGORITHM_MAP[targetPool],
         providerName,
+        prevLevel,
+        prevHashrate,
+        prevExpiresAt,
+        prevStartsAt,
+        !hadRig,
+        renew,
+        nextTier.level,
+        nextTier.hashrate,
       ]
     );
     if (orderInsert.rowCount === 0) {
@@ -281,22 +313,6 @@ async function upgradeRig(req, res) {
       [userId, protocolFeeUsdc, 'RIG_UPGRADE', orderRecordId]
     );
 
-    // RENTAL model: the rig window is extended NOW and refined to the ACTUAL
-    // rented hours after the marketplace order returns (see below). The rig
-    // stays ACTIVE while inside the window; the scheduler expires it after.
-    if (rig) {
-      await client.query(
-        'UPDATE virtual_rigs SET level = $1, virtual_hashrate = $2, maintenance_status = $3, rental_expires_at = $5, updated_at = CURRENT_TIMESTAMP WHERE rig_id = $4',
-        [nextTier.level, nextTier.hashrate, 'ACTIVE', rig.rig_id, new Date(Date.now() + 72 * 3600 * 1000)]
-      );
-    } else {
-      await client.query(
-        'INSERT INTO virtual_rigs (user_id, target_pool, virtual_hashrate, level, maintenance_status, rental_expires_at) VALUES ($1, $2, $3, $4, $5, $6)',
-        [userId, targetPool, nextTier.hashrate, nextTier.level, 'ACTIVE', new Date(Date.now() + 72 * 3600 * 1000)]
-      );
-    }
-    await logRigChange(client, userId, targetPool, nextTier.hashrate);
-
     await client.query('COMMIT');
   } catch (err) {
     await client.query('ROLLBACK');
@@ -306,151 +322,10 @@ async function upgradeRig(req, res) {
     client.release();
   }
 
-  // Place the order AFTER commit: a failed commit must never leave a live order
-  // unrecorded, and a failed order must never corrupt the DB transaction.
-  const orderResult = await placeHashpowerOrder(targetPool, spendBtcAmount);
-
-  if (!orderResult.success) {
-    // Compensate: refund the user and revert the rig to its pre-rental state.
-    // The rig must NOT keep a rental window the user didn't pay for (money
-    // back + free hashrate = financial bug).
-    const refundClient = await pool.connect();
-    try {
-      await refundClient.query('BEGIN');
-      await refundClient.query(
-        'UPDATE user_wallets SET usdc_balance = usdc_balance + $1, updated_at = CURRENT_TIMESTAMP WHERE wallet_id = $2',
-        [discountedCost, walletId]
-      );
-      await refundClient.query(
-        `UPDATE hashrate_orders SET status = 'REFUNDED', failure_reason = $1, updated_at = CURRENT_TIMESTAMP WHERE order_id = $2`,
-        [orderResult.error, orderRecordId]
-      );
-      // Reverse the fee booked for this order — it was linked by order_id so
-      // we can remove exactly the right row (previously the fee row survived
-      // a refund as phantom revenue).
-      await refundClient.query(
-        'DELETE FROM protocol_revenue_ledger WHERE order_id = $1',
-        [orderRecordId]
-      );
-      // Revert the rig to its pre-rental state (or delete if it was just created).
-      if (hadRig) {
-        const revertTier = renew
-          ? tiersFor(targetPool).find((t) => t.level === prevLevel)
-          : tiersFor(targetPool).find((t) => t.level === nextTier.level - 1) || null;
-        if (revertTier) {
-          await refundClient.query(
-            'UPDATE virtual_rigs SET level = $1, virtual_hashrate = $2, rental_expires_at = $3, updated_at = CURRENT_TIMESTAMP WHERE user_id = $4 AND target_pool = $5',
-            [revertTier.level, revertTier.hashrate, prevExpiresAt, userId, targetPool]
-          );
-          await logRigChange(refundClient, userId, targetPool, revertTier.hashrate);
-        }
-      } else {
-        await refundClient.query(
-          'DELETE FROM virtual_rigs WHERE user_id = $1 AND target_pool = $2',
-          [userId, targetPool]
-        );
-        await logRigChange(refundClient, userId, targetPool, 0);
-      }
-      await refundClient.query('COMMIT');
-      console.error(`Order failed for request ${requestId}; ${nextTier.cost} USDC refunded and rig reverted for ${walletAddress}`);
-    } catch (refundErr) {
-      await refundClient.query('ROLLBACK');
-      console.error('❌ CRITICAL: refund failed after order error:', refundErr.message);
-    } finally {
-      refundClient.release();
-    }
-    return res.status(502).json({
-      error: `Hashrate marketplace order failed: ${orderResult.error}. USDC refunded.`,
-    });
-  }
-
-  const status = orderResult.mode === 'live' ? 'PLACED' : 'SIMULATED';
-  await pool.query(
-    `UPDATE hashrate_orders
-       SET nicehash_order_id = $1, status = $2, sandbox = $3,
-           rig_name = $4, rig_rpi = $5, rig_hours = $6,
-           updated_at = CURRENT_TIMESTAMP
-     WHERE order_id = $7`,
-    [
-      orderResult.orderId || null,
-      status,
-      orderResult.mode !== 'live',
-      orderResult.rigName || null,
-      orderResult.rigRpi != null ? String(orderResult.rigRpi) : null,
-      orderResult.rigHours || null,
-      orderRecordId,
-    ]
-  );
-
-  // RENTAL model: the user's window is the ACTUAL rented hours from the
-  // marketplace order (1:1 match — no more permanent ownership). Default to
-  // 72h when the provider didn't return a length. Renewing an ACTIVE rig
-  // extends from its current expiry (no time is wasted); a fresh/upgrade rent
-  // starts now.
-  const rentalHours = orderResult.rigHours && Number(orderResult.rigHours) > 0
-    ? Number(orderResult.rigHours)
-    : 72;
-  const baseMs = renew && prevExpiresAt && new Date(prevExpiresAt).getTime() > Date.now()
-    ? new Date(prevExpiresAt).getTime()
-    : Date.now();
-  const expiresAt = new Date(baseMs + rentalHours * 3600 * 1000);
-  await pool.query(
-    `UPDATE virtual_rigs
-        SET rental_expires_at = $1, maintenance_status = 'ACTIVE', updated_at = CURRENT_TIMESTAMP
-      WHERE user_id = $2 AND target_pool = $3`,
-    [expiresAt, userId, targetPool]
-  );
-
-  // Audit trail: record the real MRR rental so the Real Backing panel and the
-  // expiry sweeper can see exactly what is backing this window.
-  try {
-    const rigIdRes = await pool.query(
-      'SELECT rig_id FROM virtual_rigs WHERE user_id = $1 AND target_pool = $2',
-      [userId, targetPool]
-    );
-    const rigId = rigIdRes.rows[0]?.rig_id;
-    if (rigId && orderResult.orderId) {
-      const actualCostBtc =
-        Number(orderResult.actualCostBtc || 0) > 0 ? Number(orderResult.actualCostBtc) : spendBtcAmount;
-      const actualCostUsd = toSatPrecision(actualCostBtc * btcSpotPrice);
-      await pool.query(
-        `INSERT INTO rig_rentals
-          (user_id, rig_id, target_pool, mrr_rental_id, rig_name, rig_rpi,
-           cost_btc, cost_usd, length_hours, funded_from, status)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'POOL', 'ACTIVE')`,
-        [
-          userId,
-          rigId,
-          targetPool,
-          String(orderResult.orderId),
-          orderResult.rigName || null,
-          orderResult.rigRpi != null ? String(orderResult.rigRpi) : null,
-          actualCostBtc,
-          actualCostUsd,
-          rentalHours,
-        ]
-      );
-      console.log(
-        `Rig ${rigId}/${targetPool} rented ${rentalHours}h via MRR rental ${orderResult.orderId} — expires ${expiresAt.toISOString()}`
-      );
-    }
-  } catch (recordErr) {
-    console.error('Could not record rig_rentals for order:', recordErr.message);
-  }
-
-  let niceHashStatus = null;
-  if (orderResult.orderId && orderResult.mode === 'live') {
-    try {
-      const st = await getOrderStatus(orderResult.orderId);
-      niceHashStatus = st?.status || null;
-    } catch (err) {
-      console.warn('Could not refresh marketplace order status:', err.message);
-    }
-  }
-
-  return res.json({
+  return res.status(202).json({
     success: true,
     duplicated: false,
+    status: 'PENDING',
     level: nextTier.level,
     hashrate: nextTier.hashrate,
     unit: POOL_UNITS[targetPool] || 'GH/s',
@@ -461,16 +336,16 @@ async function upgradeRig(req, res) {
     btc_spot_price: toSatPrecision(btcSpotPrice),
     price_feed: quote.feed,
     protocol_fee_usdc: protocolFeeUsdc,
-    nicehash_order_id: orderResult.orderId || null,
+    nicehash_order_id: null,
     marketplace: providerName,
-    rig_name: orderResult.rigName || null,
-    rig_rpi: orderResult.rigRpi != null ? String(orderResult.rigRpi) : null,
-    rig_hours: rentalHours,
-    rental_expires_at: expiresAt.toISOString(),
+    rig_name: null,
+    rig_rpi: null,
+    rig_hours: null,
+    rental_expires_at: null,
     renew: renew === true,
-    order_status: status,
-    nicehash_status: niceHashStatus,
-    sandbox: orderResult.mode !== 'live',
+    order_status: 'PENDING',
+    nicehash_status: null,
+    sandbox: false,
     request_id: requestId,
     reinvested_usdc: req.reinvestedUsdc || 0,
   });
@@ -688,9 +563,6 @@ async function buySession(req, res) {
   let discountPct = 0;
   let orderRecordId = null;
   let expiresAt = null;
-  let newHashrate = null;
-  let hadActiveRig = false;
-  let prevExpiry = null;
   // Hoisted so the response can report remaining spare AFTER the tx commits.
   let credits = 0;
   try {
@@ -728,20 +600,17 @@ async function buySession(req, res) {
       return res.status(400).json({ error: `Insufficient USDC balance (need $${price.toFixed(2)})` });
     }
 
-    // CAPACITY GUARD: lock every virtual_rig row in the room so concurrent
-    // session purchases serialize, then compute active credits.
-    const rigRows = await client.query(
-      'SELECT rig_id, user_id, virtual_hashrate, rental_expires_at FROM virtual_rigs WHERE target_pool = $1 FOR UPDATE',
+    // CAPACITY GUARD: an advisory lock also serializes an empty room, where
+    // SELECT FOR UPDATE has no rows to lock.
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`capacity:${targetPool}`]);
+    const sliceRows = await client.query(
+      `SELECT slice_id, virtual_hashrate FROM capacity_slices
+        WHERE target_pool = $1 AND starts_at <= CURRENT_TIMESTAMP
+          AND expires_at > CURRENT_TIMESTAMP FOR UPDATE`,
       [targetPool]
     );
     const now = new Date();
-    credits = 0;
-    let myRow = null;
-    for (const r of rigRows.rows) {
-      const exp = r.rental_expires_at ? new Date(r.rental_expires_at).getTime() : 0;
-      if (exp > now.getTime()) credits += Number(r.virtual_hashrate);
-      if (r.user_id === userId) myRow = r;
-    }
+    credits = sliceRows.rows.reduce((sum, row) => sum + Number(row.virtual_hashrate), 0);
     const spare = realHash - credits;
     if (ghs > spare + 1e-9) {
       await client.query('ROLLBACK');
@@ -759,8 +628,8 @@ async function buySession(req, res) {
       `INSERT INTO hashrate_orders
         (user_id, target_pool, request_id, usdc_cost, protocol_fee_usdc, btc_spent,
          btc_spot_price, price_feed, price_is_usdc_pair, algorithm, status, marketplace,
-         rig_name, rig_hours)
-      VALUES ($1, $2, $3, $4, 0, 0, 0, 'SESSION', true, $5, 'PLACED', 'SESSION', $6, $7)
+         rig_name, rig_hours, outbox_state)
+      VALUES ($1, $2, $3, $4, 0, 0, 0, 'SESSION', true, $5, 'PLACED', 'SESSION', $6, $7, 'RECONCILED')
       ON CONFLICT (request_id) DO NOTHING
       RETURNING order_id`,
       [userId, targetPool, requestId, price, POOL_ALGORITHM_MAP[targetPool], `${ghs} ${poolUnit}`, hours]
@@ -786,30 +655,15 @@ async function buySession(req, res) {
       [userId, price, 'SESSION_SALE', orderRecordId]
     );
 
-    // Session window: stack onto any existing rig (extend expiry, add hashrate)
-    // so a user can layer sessions. Expired rows reset to a fresh window.
+    // A session is its own independently expiring capacity slice. It never
+    // changes or extends the user's RENTAL slice.
     expiresAt = new Date(now.getTime() + hours * 3600 * 1000);
-    if (myRow) {
-      const baseExp = myRow.rental_expires_at ? new Date(myRow.rental_expires_at).getTime() : 0;
-      const keepExp = baseExp > now.getTime() ? new Date(baseExp) : now;
-      expiresAt = new Date(Math.max(keepExp.getTime(), expiresAt.getTime()));
-      newHashrate = toSatPrecision(Number(myRow.virtual_hashrate) + ghs);
-      hadActiveRig = keepExp > now.getTime();
-      await client.query(
-        `UPDATE virtual_rigs
-            SET virtual_hashrate = $1, maintenance_status = 'ACTIVE', rental_expires_at = $2, updated_at = CURRENT_TIMESTAMP
-          WHERE rig_id = $3`,
-        [newHashrate, expiresAt, myRow.rig_id]
-      );
-    } else {
-      newHashrate = toSatPrecision(ghs);
-      await client.query(
-        `INSERT INTO virtual_rigs (user_id, target_pool, virtual_hashrate, level, maintenance_status, rental_expires_at)
-         VALUES ($1, $2, $3, 1, 'ACTIVE', $4)`,
-        [userId, targetPool, newHashrate, expiresAt]
-      );
-    }
-    await logRigChange(client, userId, targetPool, newHashrate);
+    await client.query(
+      `INSERT INTO capacity_slices
+        (user_id, target_pool, virtual_hashrate, source, starts_at, expires_at)
+       VALUES ($1, $2, $3, 'SESSION', CURRENT_TIMESTAMP, $4)`,
+      [userId, targetPool, ghs, expiresAt]
+    );
 
     await client.query('COMMIT');
   } catch (err) {
@@ -832,7 +686,7 @@ async function buySession(req, res) {
     markup: SESSION_HOURS[hours],
     rental_expires_at: expiresAt.toISOString(),
     remaining_balance: newBalance,
-    room_spare_ghs: toSatPrecision(realHash - credits),
+    room_spare_ghs: toSatPrecision(realHash - credits - ghs),
     order_id: orderRecordId,
     request_id: requestId,
   });

@@ -60,9 +60,10 @@ async function buildBacking() {
       // ACTIVE credits only — expired 0-GH/s rigs are NOT "sold" (Kevin
       // 2026-08-20: "Rigs sold 1" with 0 GH/s and no real backing confused
       // the LTC/XMR rows).
-      `SELECT target_pool, COALESCE(SUM(virtual_hashrate),0) AS vghs, COUNT(*) AS rigs
-         FROM virtual_rigs
-        WHERE rental_expires_at > CURRENT_TIMESTAMP
+      `SELECT target_pool, COALESCE(SUM(virtual_hashrate),0) AS vghs,
+              COUNT(DISTINCT user_id) AS rigs
+         FROM capacity_slices
+        WHERE starts_at <= CURRENT_TIMESTAMP AND expires_at > CURRENT_TIMESTAMP
           AND virtual_hashrate > 0
         GROUP BY target_pool`
     ),

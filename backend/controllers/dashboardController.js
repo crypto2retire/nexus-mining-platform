@@ -50,6 +50,15 @@ async function getDashboard(req, res) {
         'SELECT rig_id, target_pool, virtual_hashrate, level, maintenance_status, rental_expires_at FROM virtual_rigs WHERE user_id = $1',
         [userId]
       );
+      const slices = await client.query(
+        `SELECT target_pool, SUM(virtual_hashrate) AS active_hashrate,
+                MAX(expires_at) AS active_expires_at
+           FROM capacity_slices
+          WHERE user_id = $1 AND starts_at <= CURRENT_TIMESTAMP
+            AND expires_at > CURRENT_TIMESTAMP
+          GROUP BY target_pool`,
+        [userId]
+      );
       const rates = await client.query('SELECT pool, usdc_per_ghs_per_day FROM pool_maintenance_rates');
 
       const pools = ['ZCASH', 'KASPA', 'LTC_DOGE', 'XMR'];
@@ -68,17 +77,19 @@ async function getDashboard(req, res) {
       const now = Date.now();
       for (const pool of pools) {
         const rig = rigs.rows.find(r => r.target_pool === pool);
+        const live = slices.rows.find(s => s.target_pool === pool);
         const level = rig ? Number(rig.level) : 1;
-        const expiresMs = rig?.rental_expires_at ? new Date(rig.rental_expires_at).getTime() : null;
+        const activeExpiry = live?.active_expires_at || null;
+        const expiresMs = activeExpiry ? new Date(activeExpiry).getTime() : null;
         // pg returns NUMERIC as strings — coerce so the frontend can call .toFixed()
-        rigsByPool[pool] = rig
+        rigsByPool[pool] = (rig || live)
           ? {
-              rig_id: rig.rig_id,
-              target_pool: rig.target_pool,
-              virtual_hashrate: Number(rig.virtual_hashrate),
+              rig_id: rig?.rig_id || null,
+              target_pool: pool,
+              virtual_hashrate: Number(live?.active_hashrate || 0),
               level,
-              maintenance_status: rig.maintenance_status,
-              rental_expires_at: rig.rental_expires_at ? new Date(rig.rental_expires_at).toISOString() : null,
+              maintenance_status: live ? 'ACTIVE' : (rig?.maintenance_status || 'INACTIVE'),
+              rental_expires_at: activeExpiry ? new Date(activeExpiry).toISOString() : null,
               rental_hours_left: expiresMs && expiresMs > now ? (expiresMs - now) / 3600000 : 0,
               rental_active: expiresMs !== null && expiresMs > now,
             }
@@ -127,8 +138,10 @@ async function getDashboard(req, res) {
       // KAS/LTC GH/s) — convert both sides to GH/s before subtracting.
       const spareRows = await client.query(
         `SELECT target_pool,
-                COALESCE(SUM(virtual_hashrate) FILTER (WHERE rental_expires_at > CURRENT_TIMESTAMP), 0) AS active_ghs
-           FROM virtual_rigs
+                COALESCE(SUM(virtual_hashrate) FILTER (
+                  WHERE starts_at <= CURRENT_TIMESTAMP AND expires_at > CURRENT_TIMESTAMP
+                ), 0) AS active_ghs
+           FROM capacity_slices
           WHERE target_pool = ANY($1::varchar[])
           GROUP BY target_pool`,
         [pools]

@@ -45,6 +45,14 @@ router.post('/rewards/withdrawals/:id/paid', requireAdminKey, markWithdrawalPaid
 router.post('/rewards/withdrawals/:id/reject', requireAdminKey, rejectWithdrawal);
 // Operator dashboard: platform-wide capacity, rewards, treasury, users.
 router.get('/admin/stats', requireAdminKey, getAdminStats);
+router.post('/admin/reconcile-deposits', requireAdminKey, async (req, res) => {
+  try {
+    const { reconcileDeposits } = require('../services/depositListener');
+    res.json(await reconcileDeposits());
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 // Real Backing panel: what ACTUALLY mines per coin vs virtual capacity sold.
 router.get('/admin/backing', requireAdminKey, async (_req, res) => {
   try {

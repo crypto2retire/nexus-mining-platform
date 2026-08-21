@@ -70,12 +70,11 @@ function distributionClient({ price = 0.05, hasHistory = true } = {}) {
         return { rowCount: 1, rows: [{ changed_at: start, hashrate: REAL_HASH }] };
       }
       if (sql.includes('INSERT INTO real_rig_hashrate_history')) return { rowCount: 1, rows: [] };
-      if (sql.includes('FROM rig_hashrate_history') && sql.includes('SELECT user_id, changed_at, hashrate')) {
+      if (sql.includes('FROM capacity_slices')) {
         return hasHistory
-          ? { rowCount: 1, rows: [{ user_id: 'user-1', changed_at: start, hashrate: '25.0000' }] }
+          ? { rowCount: 1, rows: [{ user_id: 'user-1', contribution: '600' }] }
           : { rowCount: 0, rows: [] };
       }
-      if (sql.includes('SELECT user_id, virtual_hashrate FROM virtual_rigs')) return { rowCount: 0, rows: [] };
       if (sql.includes('INSERT INTO user_rewards_ledger')) return { rowCount: 1, rows: [] };
       if (sql.includes('INSERT INTO protocol_revenue_ledger')) return { rowCount: 1, rows: [] };
       if (sql.includes('INSERT INTO maintenance_fee_ledger')) return { rowCount: 1, rows: [] };
@@ -198,16 +197,15 @@ describe('distributePayout — multiple renters pro-rata over real hashrate', ()
         return { rowCount: 1, rows: [{ changed_at: start, hashrate: REAL_HASH }] };
       }
       if (sql.includes('INSERT INTO real_rig_hashrate_history')) return { rowCount: 1, rows: [] };
-      if (sql.includes('FROM rig_hashrate_history') && sql.includes('SELECT user_id, changed_at, hashrate')) {
+      if (sql.includes('FROM capacity_slices')) {
         return {
           rowCount: 2,
           rows: [
-            { user_id: 'user-1', changed_at: start, hashrate: '25.0000' },
-            { user_id: 'user-2', changed_at: start, hashrate: '75.0000' },
+            { user_id: 'user-1', contribution: '600' },
+            { user_id: 'user-2', contribution: '1800' },
           ],
         };
       }
-      if (sql.includes('SELECT user_id, virtual_hashrate FROM virtual_rigs')) return { rowCount: 0, rows: [] };
       if (sql.includes('INSERT INTO user_rewards_ledger')) return { rowCount: 1, rows: [] };
       if (sql.includes('INSERT INTO protocol_revenue_ledger')) return { rowCount: 1, rows: [] };
       if (sql.includes('INSERT INTO maintenance_fee_ledger')) return { rowCount: 1, rows: [] };
@@ -301,10 +299,9 @@ describe('distributeAccrued — daily accrual payouts (016)', () => {
         if (sql.includes('SELECT changed_at, hashrate') && sql.includes('real_rig_hashrate_history')) {
           return { rowCount: 1, rows: [{ changed_at: start, hashrate: REAL_HASH }] };
         }
-        if (sql.includes('FROM rig_hashrate_history') && sql.includes('SELECT user_id, changed_at, hashrate')) {
-          return { rowCount: 1, rows: [{ user_id: 'user-1', changed_at: start, hashrate: '25.0000' }] };
+        if (sql.includes('FROM capacity_slices')) {
+          return { rowCount: 1, rows: [{ user_id: 'user-1', contribution: '150' }] };
         }
-        if (sql.includes('SELECT user_id, virtual_hashrate FROM virtual_rigs')) return { rowCount: 0, rows: [] };
         if (sql.includes('INSERT INTO user_rewards_ledger')) return { rowCount: 1, rows: [] };
         if (sql.includes('INSERT INTO protocol_revenue_ledger')) return { rowCount: 1, rows: [] };
         if (sql.includes('UPDATE room_accrual')) return { rowCount: 1, rows: [] };

@@ -58,38 +58,21 @@ async function logRigChange(client, userId, targetPool, hashrate) {
  */
 async function contributionsForPool(client, targetPool, start, end) {
   const { rows } = await client.query(
-    `SELECT user_id, changed_at, hashrate
-       FROM rig_hashrate_history
-      WHERE target_pool = $1 AND changed_at <= $2
-      ORDER BY user_id, changed_at`,
-    [targetPool, end]
+    `SELECT user_id,
+            SUM(virtual_hashrate *
+                (EXTRACT(EPOCH FROM
+                  (LEAST(expires_at, $3::timestamptz) - GREATEST(starts_at, $2::timestamptz)))
+                 / 3600.0)) AS contribution
+       FROM capacity_slices
+      WHERE target_pool = $1
+        AND starts_at < $3
+        AND expires_at > $2
+      GROUP BY user_id`,
+    [targetPool, start, end]
   );
-
-  const byUser = new Map();
-  for (const r of rows) {
-    if (!byUser.has(r.user_id)) byUser.set(r.user_id, []);
-    byUser.get(r.user_id).push(r);
-  }
-
-  const result = [];
-  for (const [uid, hist] of byUser) {
-    const contribution = computeContributions(hist, start, end);
-    if (contribution > 0) result.push({ user_id: uid, contribution });
-  }
-
-  // Fallback: rig exists but no history rows (created before logging started).
-  const rigs = await client.query(
-    'SELECT user_id, virtual_hashrate FROM virtual_rigs WHERE target_pool = $1',
-    [targetPool]
-  );
-  const hours = Math.max(0, (end.getTime() - start.getTime()) / 3600000);
-  for (const rig of rigs.rows) {
-    if (!byUser.has(rig.user_id)) {
-      const contribution = Number(rig.virtual_hashrate) * hours;
-      if (contribution > 0) result.push({ user_id: rig.user_id, contribution });
-    }
-  }
-  return result;
+  return rows
+    .map((row) => ({ user_id: row.user_id, contribution: Number(row.contribution) }))
+    .filter((row) => row.contribution > 0);
 }
 
 /**

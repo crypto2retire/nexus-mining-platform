@@ -18,9 +18,9 @@ async function getAdminStats(_req, res) {
       pool.query(
         `SELECT target_pool,
                 COALESCE(SUM(virtual_hashrate), 0) AS total_hashrate,
-                COUNT(*) AS rig_count
-           FROM virtual_rigs
-          WHERE rental_expires_at > CURRENT_TIMESTAMP
+                COUNT(DISTINCT user_id) AS rig_count
+           FROM capacity_slices
+          WHERE starts_at <= CURRENT_TIMESTAMP AND expires_at > CURRENT_TIMESTAMP
             AND virtual_hashrate > 0
           GROUP BY target_pool
           ORDER BY target_pool`

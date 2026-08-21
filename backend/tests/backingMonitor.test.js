@@ -16,7 +16,7 @@ const { getBacking, buildBacking, TTL_MS } = require('../services/backingMonitor
 
 function mockPool(overrides = {}) {
   pool.query.mockImplementation(async (sql) => {
-    if (sql.includes('FROM virtual_rigs')) {
+    if (sql.includes('FROM capacity_slices')) {
       return {
         rows: overrides.virtual || [
           { target_pool: 'KASPA', vghs: '25', rigs: '1' },

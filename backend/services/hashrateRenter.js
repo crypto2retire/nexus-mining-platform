@@ -100,7 +100,7 @@ function buildSignature({ xTime, xNonce, method, path, query, body, apiKey, apiS
     .digest('hex');
 }
 
-async function makeNiceHashRequest(method, path, query = null, bodyObj = null) {
+async function makeNiceHashRequest(method, path, query = null, bodyObj = null, requestId = null) {
   const xTime = getEpochMs();
   const xNonce = generateNonce();
   const queryString = query ? new URLSearchParams(query).toString() : '';
@@ -120,7 +120,7 @@ async function makeNiceHashRequest(method, path, query = null, bodyObj = null) {
     'X-Nonce': xNonce,
     'X-Auth': `${process.env.NICEHASH_API_KEY}:${signature}`,
     'X-Organization-Id': process.env.NICEHASH_ORG_ID,
-    'X-Request-Id': crypto.randomUUID(),
+    'X-Request-Id': requestId || crypto.randomUUID(),
     'Content-Type': 'application/json',
   };
 
@@ -174,7 +174,7 @@ async function getOrderStatus(orderId) {
  * @param {number} spendBtcAmount - BTC amount to spend (e.g. 0.000475)
  * @returns {Promise<{success: boolean, mode: 'sandbox'|'live', orderId?: string, sandbox?: boolean, error?: string, niceHashResponse?: object}>}
  */
-async function placeHashpowerOrder(targetPool, spendBtcAmount) {
+async function placeHashpowerOrder(targetPool, spendBtcAmount, requestId = null) {
   const algorithm = POOL_ALGORITHM_MAP[targetPool];
   if (!algorithm) {
     return { success: false, mode: 'sandbox', error: `Unknown target pool: ${targetPool}` };
@@ -270,11 +270,21 @@ async function placeHashpowerOrder(targetPool, spendBtcAmount) {
       poolId,
     };
 
+    // Retries for one Nexus order reuse a deterministic provider request id.
+    // This lets NiceHash reject/reconcile a repeated POST instead of creating
+    // a second live order after a worker crash.
+    const requestHash = requestId
+      ? crypto.createHash('sha256').update(String(requestId)).digest('hex').slice(0, 32)
+      : null;
+    const providerRequestId = requestHash
+      ? `${requestHash.slice(0, 8)}-${requestHash.slice(8, 12)}-${requestHash.slice(12, 16)}-${requestHash.slice(16, 20)}-${requestHash.slice(20)}`
+      : null;
     const result = await makeNiceHashRequest(
       'POST',
       '/main/api/v2/hashpower/order/',
       null,
-      body
+      body,
+      providerRequestId
     );
 
     return {
