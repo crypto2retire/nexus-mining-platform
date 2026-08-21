@@ -4,6 +4,7 @@ const { upgradeRig, reinvestRig, buySession } = require('../controllers/upgradeC
 const { handleRewardWebhook } = require('../services/rewardDistributor');
 const { getRewards, claimRewards, withdrawRewards, listWithdrawals, markWithdrawalPaid, rejectWithdrawal } = require('../controllers/rewardsController');
 const { getAdminStats } = require('../controllers/adminStatsController');
+const { getState, claimStreak, createReferralLink, applyReferralCode } = require('../controllers/gameController');
 const { createChallenge, verifySignature } = require('../services/authService');
 const { requireAuth } = require('../middleware/auth');
 const { requireAdminKey } = require('../middleware/adminAuth');
@@ -29,6 +30,10 @@ router.post('/auth/verify', async (req, res) => {
   }
 });
 router.get('/auth/me', requireAuth, (req, res) => res.json({ wallet: req.auth.wallet }));
+router.get('/game/state', requireAuth, getState);
+router.post('/game/streak/claim', requireAuth, claimStreak);
+router.post('/game/referral/create', requireAuth, createReferralLink);
+router.post('/game/referral/apply', requireAuth, applyReferralCode);
 router.post('/rigs/upgrade', requireAuth, upgradeRig);
 // HYBRID: short hashrate sessions drawn from the room's spare capacity.
 router.post('/rigs/session', requireAuth, buySession);

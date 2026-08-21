@@ -726,6 +726,128 @@ button:disabled {
   padding: 2rem;
 }
 
+/* Deterministic daily streak + single-level referral panel. */
+.game-panel {
+  margin-bottom: 1.25rem;
+  padding: 1.5rem;
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  background: var(--surface);
+}
+
+.game-panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.game-panel-header h2,
+.game-referral h3 {
+  margin: 0;
+}
+
+.game-panel-header p,
+.game-referral p {
+  margin: 0.35rem 0 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.game-streak {
+  flex: 0 0 auto;
+  padding: 0.45rem 0.75rem;
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  border-radius: 9999px;
+  background: rgba(245, 158, 11, 0.12);
+  color: #fbbf24;
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+.game-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 0.9rem;
+}
+
+.game-claim {
+  width: 100%;
+}
+
+.game-loading,
+.game-error,
+.game-message {
+  margin-bottom: 0.9rem;
+  padding: 0.65rem 0.8rem;
+  border-radius: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.game-loading {
+  color: var(--muted);
+  background: var(--surface-2);
+}
+
+.game-error {
+  color: var(--danger);
+  border: 1px solid rgba(248, 113, 113, 0.4);
+  background: rgba(248, 113, 113, 0.12);
+}
+
+.game-message {
+  color: var(--success);
+  border: 1px solid rgba(52, 211, 153, 0.4);
+  background: rgba(52, 211, 153, 0.12);
+}
+
+.game-referral {
+  margin-top: 1.2rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.game-referral-stats {
+  display: flex;
+  gap: 1rem;
+  margin: 0.85rem 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.game-referral-stats strong,
+.game-referral-code strong {
+  color: var(--text);
+}
+
+.game-referral-link {
+  display: flex;
+  gap: 0.6rem;
+}
+
+.game-referral-link input {
+  min-width: 0;
+  flex: 1;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.game-referral-link button {
+  flex: 0 0 auto;
+}
+
+.game-referral-code {
+  display: block;
+  margin-top: 0.55rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
 .footer {
   text-align: center;
   padding: 1rem;
@@ -748,6 +870,14 @@ button:disabled {
   }
   .summary-row {
     grid-template-columns: 1fr;
+  }
+  .game-stats {
+    grid-template-columns: 1fr;
+  }
+  .game-referral-stats,
+  .game-referral-link {
+    align-items: stretch;
+    flex-direction: column;
   }
 }
 

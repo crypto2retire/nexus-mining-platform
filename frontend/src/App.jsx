@@ -4,6 +4,7 @@ import SummaryRow from './components/SummaryRow';
 import GetStarted from './components/GetStarted';
 import AdminPanel from './components/AdminPanel';
 import WalletAuth, { AUTH_STORAGE_KEY } from './components/WalletAuth';
+import GamePanel from './components/GamePanel';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 const VALID_WALLET_RE = /^0x[a-f0-9]{40}$/i;
@@ -322,6 +323,8 @@ export default function App() {
             Nexus never asks for your recovery phrase.
           </div>
         )}
+
+        {!restoringSession && auth && data && <GamePanel auth={auth} />}
 
         {data && (
           <>
