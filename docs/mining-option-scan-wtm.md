@@ -51,3 +51,53 @@ sell.**
 - WhatToMine difficulty/price data is live at read time but changes daily.
 - Liquidity verdicts from WhatToMine exchange volume fields (24h).
 - Not investment or legal advice.
+
+---
+
+## Re-scan 2026-08-21 (evening) — "anything worth a 2nd look?"
+
+**Source:** free WhatToMine `coins.json` (GPU coins only — ASIC coins not covered;
+license NOT commercial — research-only, never wire into the platform) + live
+network data (2Miners ZEC / herominers XMR difficulty) + CoinGecko spot at read
+time. BTC $78,447. Production anchors = 8/21 verified fleet rates.
+
+### Rented fleet (platform's actual model) — today's prices
+
+| Rig | Production (8/21) | Value today | Rental cost | Net |
+|---|---|---|---|---|
+| KAS KS0 PRO 200 GH/s | 1.3832 KAS × $0.02953 | $0.041 | $0.07 | **−$0.03/d** (flat) |
+| ZEC z9 30.55 kSol/s | 0.002060 ZEC × $733.6 | $1.511 | $1.97 | **−$0.46/d** (was −$0.63 — best mover) |
+| XMR CPU 14.25 kH/s | 0.000479 XMR × $409.5 | $0.196 | $0.64 | **−$0.44/d** (flat) |
+| LTC/DOGE 7 GH/s | ≈$2.80 full credit (8/21) | ≈$2.93 | $3.46–3.90 | **−$0.53 to −$0.97/d** (DOGE +11%) |
+
+Fleet: **≈ −$1.46 to −$1.90/day** (was −$1.76 to −$2.20).
+
+### Owned hardware at $0.12/kWh (WhatToMine-style)
+
+| Rig | Revenue | Power | Net |
+|---|---|---|---|
+| L7 9.5 GH/s scrypt (+DOGE) | $3.19 | $9.86 | **−$6.67/d** (was −$9.21) |
+| KS5 20 TH/s kHeavyHash | $4.09 | $8.64 | **−$4.56/d** (was −$4.84) |
+| Z9 30 kSol/s equihash | $1.48 | $2.16 | **−$0.68/d** (was −$1.33) |
+| EPYC RandomX 45 kH/s | $0.62–1.18* | $0.81 | **±borderline** (was +$0.65) |
+
+*XMR nethash estimate spread: difficulty/blocktime ≈ 6.8 GH/s (→ +$0.37/d) vs
+fleet-observed-implied ≈ 12.9 GH/s (→ −$0.19/d). Network appears to have grown
+since the morning scan — the margin compressed.
+
+### GPU screen (free coins.json, 4090 @ 330W)
+
+ERG +$0.13/d (marginal, thin volume), RVN −$0.23/d (skip holds; re-entry only
+≥$0.008), ETC −$0.89/d. No new buildable candidate.
+
+### Verdict
+
+- **Nothing flipped positive for the rented fleet**, but ZEC narrowed the most
+  (price +12%): z9 loss −$0.63 → −$0.46/d. Watch ZEC — it's the only room
+  trending toward break-even.
+- **XMR's owned-hardware edge may be gone** (network growth) — re-check next
+  scan; rental XMR unchanged.
+- **No new coin/algorithm worth opening.** Micro-caps remain the same
+  illiquid mirage. RVN skip valid.
+- Strategic conclusion unchanged: mining is a cost center; the business is
+  service fees + the game layer. Weekly re-scan = the alert system.
