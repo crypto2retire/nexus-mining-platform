@@ -848,6 +848,195 @@ button:disabled {
   font-size: 0.8rem;
 }
 
+/* Operator-only live MRR market and delivery-adjusted P/L panel. */
+.market-panel {
+  margin-bottom: 1.25rem;
+  padding: 1.5rem;
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  background: var(--surface);
+}
+
+.market-panel__header,
+.market-trend,
+.market-tabs,
+.market-scenario-grid {
+  display: flex;
+  align-items: center;
+}
+
+.market-panel__header {
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.market-panel__header h2,
+.market-orders h3 {
+  margin: 0;
+}
+
+.market-panel__header p {
+  margin: 0.35rem 0 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.market-panel__operator {
+  padding: 0.4rem 0.7rem;
+  border: 1px solid rgba(96, 165, 250, 0.4);
+  border-radius: 9999px;
+  color: #93c5fd;
+  background: rgba(59, 130, 246, 0.12);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.market-tabs {
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 1rem 0;
+}
+
+.market-tabs button {
+  padding: 0.55rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  color: var(--muted);
+  background: var(--surface-2);
+  cursor: pointer;
+}
+
+.market-tabs button.active {
+  border-color: var(--accent);
+  color: var(--text);
+  background: rgba(96, 165, 250, 0.14);
+}
+
+.market-panel__notice,
+.market-panel__error,
+.market-panel__message,
+.market-best {
+  margin: 0.8rem 0;
+  padding: 0.7rem 0.85rem;
+  border-radius: 0.55rem;
+  font-size: 0.86rem;
+}
+
+.market-panel__notice { color: var(--muted); background: var(--surface-2); }
+.market-panel__error { color: var(--danger); border: 1px solid rgba(248, 113, 113, 0.4); background: rgba(248, 113, 113, 0.12); }
+.market-panel__message { color: var(--success); border: 1px solid rgba(52, 211, 153, 0.4); background: rgba(52, 211, 153, 0.12); }
+.market-best { border: 1px solid rgba(245, 158, 11, 0.35); color: #fcd34d; background: rgba(245, 158, 11, 0.1); }
+
+.market-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.market-trends {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin: 0.9rem 0;
+}
+
+.market-trend {
+  gap: 0.8rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--surface-2);
+  font-size: 0.82rem;
+}
+
+.market-positive { color: var(--success); }
+.market-negative { color: var(--danger); }
+
+.market-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 0.65rem;
+}
+
+.market-table,
+.market-lengths {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+}
+
+.market-table th,
+.market-table td,
+.market-lengths th,
+.market-lengths td {
+  padding: 0.65rem;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.market-table th,
+.market-lengths th {
+  color: var(--muted);
+  background: var(--surface-2);
+}
+
+.market-rig-name {
+  max-width: 18rem;
+  padding: 0;
+  border: 0;
+  color: var(--text);
+  background: transparent;
+  cursor: pointer;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.market-rent { padding: 0.45rem 0.7rem; }
+
+.market-scenarios td {
+  white-space: normal;
+  background: rgba(0, 0, 0, 0.16);
+}
+
+.market-scenarios p {
+  margin: 0 0 0.75rem;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.market-scenario-grid {
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  margin-bottom: 0.8rem;
+}
+
+.market-scenario-grid span {
+  padding: 0.4rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
+  background: var(--surface-2);
+}
+
+.market-lengths { max-width: 36rem; }
+
+.market-orders {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.market-orders ul {
+  margin: 0.65rem 0 0;
+  padding-left: 1.2rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.market-orders li { margin: 0.35rem 0; }
+
 .footer {
   text-align: center;
   padding: 1rem;
@@ -878,6 +1067,14 @@ button:disabled {
   .game-referral-link {
     align-items: stretch;
     flex-direction: column;
+  }
+  .market-panel__header,
+  .market-trend {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .market-summary {
+    grid-template-columns: 1fr 1fr;
   }
 }
 

@@ -225,11 +225,27 @@ async function processOneOrder() {
   if (!order) return false;
   let result;
   try {
-    result = await renterFor(order.marketplace).placeHashpowerOrder(
-      order.target_pool,
-      Number(order.btc_spent),
-      order.request_id
-    );
+    const marketplace = String(order.marketplace || '').toUpperCase();
+    const renter = renterFor(order.marketplace);
+    if (marketplace === 'MRR' && order.requested_rig_id) {
+      result = await renter.placeHashpowerOrder(
+        order.target_pool,
+        Number(order.btc_spent),
+        {
+          rigId: order.requested_rig_id,
+          lengthHours: Number(order.requested_length_hours),
+          profileId: order.pool_profile_id,
+        }
+      );
+    } else if (marketplace === 'MRR') {
+      result = await renter.placeHashpowerOrder(order.target_pool, Number(order.btc_spent));
+    } else {
+      result = await renter.placeHashpowerOrder(
+        order.target_pool,
+        Number(order.btc_spent),
+        order.request_id
+      );
+    }
   } catch (err) {
     result = { success: false, error: err.message };
   }

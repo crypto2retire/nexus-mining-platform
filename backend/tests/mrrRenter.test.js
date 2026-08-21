@@ -257,6 +257,107 @@ describe('placeHashpowerOrder (MRR)', () => {
     expect(result.success).toBe(false);
     expect(result.error).toMatch(/Insufficient balance/);
   });
+
+  test('live exact-rig override verifies and rents the requested rig without budget selection', async () => {
+    setEnv({ NODE_ENV: 'production', LIVE_ORDERS: '1', PROFILE_EQUIHASH: '40073' });
+    axios.mockImplementation(({ method, url, data }) => {
+      if (method === 'GET' && url.includes('/rig?')) {
+        return Promise.resolve({
+          data: {
+            success: true,
+            data: {
+              records: [
+                {
+                  id: 'rig-exact-7',
+                  name: 'Exact ZEC Rig',
+                  rpi: '97.4',
+                  online: true,
+                  status: { status: 'available', rented: false, online: true },
+                  minhours: '3',
+                  maxhours: '96',
+                  price: { BTC: { hour: '0.000004', min_rental_length: 3, enabled: true } },
+                  hashrate: { advertised: { hash: 30.55, type: 'kh', nice: '30.55K' } },
+                },
+              ],
+            },
+          },
+        });
+      }
+      if (method === 'PUT' && url.endsWith('/rental')) {
+        expect(JSON.parse(data)).toEqual({
+          rig: 'rig-exact-7',
+          length: 24,
+          profile: 'profile-77',
+          currency: 'BTC',
+        });
+        return Promise.resolve({
+          data: {
+            success: true,
+            data: { rental: { id: 'rental-exact-1', price: { paid: '0.000096' } } },
+          },
+        });
+      }
+      return Promise.reject(new Error(`unexpected call ${method} ${url}`));
+    });
+
+    const result = await placeHashpowerOrder('ZCASH', 0, {
+      rigId: 'rig-exact-7',
+      lengthHours: 24,
+      profileId: 'profile-77',
+    });
+
+    expect(result).toMatchObject({
+      success: true,
+      mode: 'live',
+      orderId: 'rental-exact-1',
+      actualCostBtc: 0.000096,
+      rigName: 'Exact ZEC Rig',
+      rigRpi: 97.4,
+      rigHours: 24,
+    });
+    expect(axios.mock.calls.filter(([config]) => config.method === 'GET')).toHaveLength(1);
+    expect(axios.mock.calls.filter(([config]) => config.method === 'PUT')).toHaveLength(1);
+  });
+
+  test('live exact-rig override refuses a requested rig that is no longer available', async () => {
+    setEnv({ NODE_ENV: 'production', LIVE_ORDERS: '1', PROFILE_EQUIHASH: '40073' });
+    axios.mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          records: [{
+            id: 'rig-rented',
+            online: true,
+            status: { status: 'rented', rented: true, online: true },
+            minhours: '3',
+            maxhours: '96',
+            price: { BTC: { hour: '0.000004', min_rental_length: 3, enabled: true } },
+            hashrate: { advertised: { hash: 30.55, type: 'kh' } },
+          }],
+        },
+      },
+    });
+
+    const result = await placeHashpowerOrder('ZCASH', 0, {
+      rigId: 'rig-rented', lengthHours: 24, profileId: 'profile-77',
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/no longer available/i);
+    expect(axios.mock.calls.every(([config]) => config.method === 'GET')).toBe(true);
+  });
+
+  test('live exact-rig override requires the profile persisted with the outbox order', async () => {
+    setEnv({ NODE_ENV: 'production', LIVE_ORDERS: '1', PROFILE_EQUIHASH: 'fallback-profile' });
+
+    const result = await placeHashpowerOrder('ZCASH', 0, {
+      rigId: 'rig-exact-7', lengthHours: 24, profileId: '',
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/MRR_POOL_PROFILE_EQUIHASH/);
+    expect(axios).not.toHaveBeenCalled();
+  });
 });
 
 describe('findAffordableRig', () => {

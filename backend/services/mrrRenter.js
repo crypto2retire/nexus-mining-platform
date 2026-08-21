@@ -14,8 +14,8 @@ const crypto = require('crypto');
  *     x-api-sign = hex HMAC-SHA1(apiKey + nonce + endpoint, apiSecret)
  *     where endpoint is the path WITHOUT trailing slash and WITHOUT query.
  *   - Endpoints: GET /info/algos (public), GET /rig (public market data),
- *     GET /account/profile (pool profiles), POST /rig/{id} (rent a rig,
- *     body {length: hours, profileid}), GET /rental/{id} (rental status).
+ *     GET /account/profile (pool profiles), PUT /rental (rent a rig,
+ *     body {rig, length, profile, currency}), GET /rental/{id} (status).
  *   - Payment is BTC/LTC/ETH/BCH/DOGE balance held on the MRR account —
  *     NOT USDC. The Nexus loop converts USDC -> BTC at spot, so the MRR
  *     account must hold a BTC balance to cover orders.
@@ -152,7 +152,10 @@ async function getPoolProfiles() {
  *
  * @returns {Promise<{rigId, rigName, rigRpi, hourly, length, cost, hashrate}|null>}
  */
-const MAX_RENTAL_HOURS = Number(process.env.MRR_MAX_RENTAL_HOURS || 72);
+const configuredMaxRentalHours = Number(process.env.MRR_MAX_RENTAL_HOURS || 72);
+const MAX_RENTAL_HOURS = Number.isFinite(configuredMaxRentalHours) && configuredMaxRentalHours > 0
+  ? configuredMaxRentalHours
+  : 72;
 
 function isRpiNumber(value) {
   return value !== undefined && value !== null && String(value).trim() !== '' && !/^new$/i.test(String(value).trim());
@@ -201,6 +204,38 @@ function advertisedInBase(rig, algorithm) {
   const mult = HASH_TYPE_TO_BASE[algorithm]?.[String(adv.type || '').toLowerCase()];
   if (mult === undefined) return null;
   return Number(adv.hash || 0) * mult;
+}
+
+/** Advertised hashrate normalized to GH/s for cross-algorithm comparisons. */
+function advertisedGhs(rig) {
+  const adv = rig?.hashrate?.advertised;
+  if (!adv) return null;
+  const multiplier = {
+    h: 1e-9,
+    kh: 1e-6,
+    mh: 1e-3,
+    gh: 1,
+    th: 1e3,
+    ph: 1e6,
+  }[String(adv.type || '').toLowerCase()];
+  if (multiplier === undefined) return null;
+  const value = Number(adv.hash);
+  return Number.isFinite(value) && value > 0 ? value * multiplier : null;
+}
+
+function meetsAdvertisedMinimum(rig, algorithm) {
+  const floor = MIN_ADVERTISED[algorithm];
+  const advertised = advertisedInBase(rig, algorithm);
+  return floor !== undefined && advertised !== null && advertised >= floor;
+}
+
+function rigIsAvailable(rig) {
+  const status = String(rig?.status?.status || rig?.available_status || '').toLowerCase();
+  return status === 'available' &&
+    rig?.online !== false &&
+    rig?.status?.online !== false &&
+    rig?.status?.rented !== true &&
+    rig?.rented !== true;
 }
 
 async function findAffordableRig(algorithm, budgetBtc) {
@@ -283,7 +318,7 @@ async function getOrderStatus(orderId) {
  * @param {number} spendBtcAmount - BTC amount to spend (e.g. 0.000475)
  * @returns {Promise<{success: boolean, mode: 'sandbox'|'live', orderId?: string, sandbox?: boolean, error?: string, mrrResponse?: object}>}
  */
-async function placeHashpowerOrder(targetPool, spendBtcAmount) {
+async function placeHashpowerOrder(targetPool, spendBtcAmount, exactRig = null) {
   const algorithm = POOL_ALGORITHM_MAP[targetPool];
   if (!algorithm) {
     return { success: false, mode: 'sandbox', error: `Unknown target pool: ${targetPool}` };
@@ -316,8 +351,11 @@ async function placeHashpowerOrder(targetPool, spendBtcAmount) {
 
   try {
     // The MRR account must hold a pool profile (pointing at the Nexus pool)
-    // for each algorithm before live orders can be placed.
-    const profileId = process.env[`MRR_POOL_PROFILE_${algorithm}`] || '';
+    // for each algorithm before live orders can be placed. Operator outbox
+    // orders persist the exact profile id used when the order was created.
+    const profileId = exactRig?.rigId
+      ? String(exactRig.profileId || '').trim()
+      : process.env[`MRR_POOL_PROFILE_${algorithm}`] || '';
     if (!profileId) {
       return {
         success: false,
@@ -328,10 +366,49 @@ async function placeHashpowerOrder(targetPool, spendBtcAmount) {
       };
     }
 
-    // Financial integrity: never spend MORE than the user paid to satisfy a
-    // rig minimum. If the cheapest rig's minimum cost exceeds the budget the
-    // upgrade is rejected; the controller refunds the user automatically.
-    const fit = await findAffordableRig(algorithm.toLowerCase(), spendBtcAmount);
+    let fit;
+    if (exactRig?.rigId) {
+      const market = await makeMrrRequest('GET', '/rig', {
+        type: algorithm.toLowerCase(),
+        rented: 'false',
+        limit: '50',
+      });
+      const rig = (market?.data?.records || []).find(
+        (candidate) => String(candidate?.id) === String(exactRig.rigId)
+      );
+      if (!rig || !rigIsAvailable(rig) || !meetsAdvertisedMinimum(rig, algorithm.toLowerCase())) {
+        return {
+          success: false,
+          mode: 'live',
+          error: `Requested ${algorithm} rig is no longer available or eligible`,
+        };
+      }
+      const length = Number(exactRig.lengthHours);
+      const minHours = Number(rig?.price?.BTC?.min_rental_length || rig?.minhours || 0);
+      const maxHours = Number(rig?.maxhours || MAX_RENTAL_HOURS);
+      const hourly = Number(rig?.price?.BTC?.hour || 0);
+      if (!Number.isInteger(length) || length < minHours || length > maxHours ||
+          length > MAX_RENTAL_HOURS || !hourly || rig?.price?.BTC?.enabled === false) {
+        return {
+          success: false,
+          mode: 'live',
+          error: `Requested rental length or BTC pricing is no longer valid for ${algorithm} rig`,
+        };
+      }
+      fit = {
+        rigId: String(rig.id),
+        rigName: String(rig.name || ''),
+        rigRpi: rpiOf(rig),
+        hourly,
+        length,
+        cost: to8(length * hourly),
+        hashrate: rig.hashrate || null,
+      };
+    } else {
+      // Financial integrity for player orders: never spend MORE than the user
+      // paid merely to satisfy a rig minimum.
+      fit = await findAffordableRig(algorithm.toLowerCase(), spendBtcAmount);
+    }
     if (!fit) {
       return {
         success: false,
@@ -412,4 +489,10 @@ module.exports = {
   LIVE_ORDERS_ENV,
   MRR_HOST,
   MIN_ORDER_BTC,
+  MIN_ADVERTISED,
+  HASH_TYPE_TO_BASE,
+  advertisedInBase,
+  advertisedGhs,
+  meetsAdvertisedMinimum,
+  rigIsAvailable,
 };

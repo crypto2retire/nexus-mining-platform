@@ -5,9 +5,11 @@ import GetStarted from './components/GetStarted';
 import AdminPanel from './components/AdminPanel';
 import WalletAuth, { AUTH_STORAGE_KEY } from './components/WalletAuth';
 import GamePanel from './components/GamePanel';
+import MarketPanel from './components/MarketPanel';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 const VALID_WALLET_RE = /^0x[a-f0-9]{40}$/i;
+const OPERATOR_WALLET = String(import.meta.env.VITE_OPERATOR_WALLET || '').trim().toLowerCase();
 
 const POOLS = [
   { key: 'ZCASH', title: 'Zcash (ZEC) Mine' },
@@ -74,6 +76,7 @@ export default function App() {
   // pre-purchase numbers (KAS 25 GH/s while the card showed 75).
   const [dataVersion, setDataVersion] = useState(0);
   const wallet = auth?.wallet || '';
+  const isOperator = Boolean(OPERATOR_WALLET) && wallet.trim().toLowerCase() === OPERATOR_WALLET;
 
   const fetchDashboard = async (address) => {
     const addr = (address ?? wallet).trim().toLowerCase();
@@ -325,6 +328,7 @@ export default function App() {
         )}
 
         {!restoringSession && auth && data && <GamePanel auth={auth} />}
+        {!restoringSession && auth && data && isOperator && <MarketPanel auth={auth} />}
 
         {data && (
           <>

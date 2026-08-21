@@ -54,6 +54,47 @@ test('worker places an order only after it has been claimed from committed PENDI
   expect(client.query.mock.calls.some(([sql]) => sql.includes("outbox_state = 'PLACED'"))).toBe(true);
 });
 
+test('worker passes the persisted exact-rig override for operator MRR orders', async () => {
+  const operatorOrder = {
+    ...ORDER,
+    marketplace: 'MRR',
+    btc_spent: '0',
+    requested_rig_id: 'rig-42',
+    requested_length_hours: 24,
+    pool_profile_id: 'profile-9',
+  };
+  pool.query.mockResolvedValueOnce({ rows: [operatorOrder] });
+  require('../services/mrrRenter').placeHashpowerOrder.mockResolvedValue({
+    success: true,
+    mode: 'live',
+    orderId: 'rental-42',
+    actualCostBtc: 0.00012,
+    rigHours: 24,
+  });
+  txClient(operatorOrder);
+
+  await expect(processOneOrder()).resolves.toBe(true);
+
+  expect(require('../services/mrrRenter').placeHashpowerOrder).toHaveBeenCalledWith(
+    'KASPA',
+    0,
+    { rigId: 'rig-42', lengthHours: 24, profileId: 'profile-9' }
+  );
+});
+
+test('worker keeps existing MRR budget selection when no exact rig was persisted', async () => {
+  const budgetOrder = { ...ORDER, marketplace: 'MRR' };
+  pool.query.mockResolvedValueOnce({ rows: [budgetOrder] });
+  require('../services/mrrRenter').placeHashpowerOrder.mockResolvedValue({
+    success: true, mode: 'live', orderId: 'rental-budget', rigHours: 72,
+  });
+  txClient(budgetOrder);
+
+  await expect(processOneOrder()).resolves.toBe(true);
+
+  expect(require('../services/mrrRenter').placeHashpowerOrder).toHaveBeenCalledWith('KASPA', 0.0001);
+});
+
 test('placement failure refunds funds and reverts a newly created rig in one transaction', async () => {
   pool.query.mockResolvedValueOnce({ rows: [ORDER] });
   renter.placeHashpowerOrder.mockResolvedValue({ success: false, error: 'no capacity' });
