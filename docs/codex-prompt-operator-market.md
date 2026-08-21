@@ -1,0 +1,150 @@
+# Codex Prompt: Operator Market Dashboard + Direct MRR Ordering
+
+> Paste the block below into Codex. Work in the local repo:
+> `/Users/cleartheclutter/dev/nexus-mining-platform`. Do NOT commit. Do NOT
+> deploy — the operator reviews and deploys after.
+
+---
+
+## Task
+
+Build an operator-only "Mining Market" view for the Nexus dashboard:
+
+1. **Market explorer** — for each room algorithm (kheavyhash=KAS, scrypt=LTC,
+   equihash=ZEC, randomx=XMR), show the live MiningRigRentals (MRR) options:
+   rig name, hashrate size, **cost in USD** (BTC price × live BTC/USD from
+   `backend/services/priceOracle.js`), available time frames (min rental
+   hours, max, extensions), reliability (rpi), region, availability.
+2. **Best-value recommendation** — deterministic analysis (NO randomness, NO
+   fabricated numbers): rank available rigs by **USD per GH/s-day** among
+   online, available, not-rented, verified rigs (rpi >= 90 preferred; skip
+   rpi === 'new' unless nothing else qualifies), and surface the top pick
+   with its reasoning (cost per GH/s-day, min rental cost, reliability).
+3. **Direct order** — operator rents a chosen rig and the cost comes straight
+   out of the MRR account's BTC balance (NO USDC charge). Prices displayed in
+   USD only.
+
+## Verified MRR API facts (all probed live 2026-08-21, auth pattern in
+`backend/mrr-watchdog.js`: HMAC-SHA1 over KEY+nonce+path, headers
+x-api-nonce/x-api-key/x-api-sign; base https://www.miningrigrentals.com/api/v2)
+
+- **GET /rig?type=<algo>&limit=50** — market listings. Response
+  `data.records[]` shape (verified):
+  `{ id, name, owner, type, region, rpi, online,
+     status: { status: 'available'|'rented', hours, rented, online },
+     hashrate: { advertised: { hash, type, nice },
+                 last_5min: {hash,nice,type}, last_15min, last_30min },
+     price: { type: 'th'|'gh'|..., BTC: { currency:'BTC', price, hour,
+              minhrs, maxhrs, min_rental_length, enabled }, LTC:{...}, ... },
+     extensions: true|false, ndevices }`
+  - `price.BTC.hour` = BTC per hour; `minhrs` = cost of the minimum rental;
+    `maxhrs` = cost of the max rental; `min_rental_length` = minimum hours.
+  - algo values: `kheavyhash`, `scrypt`, `equihash`, `randomx`.
+- **GET /info/algos** — aggregate stats per algo (available rigs/hash,
+  prices lowest/last_10/last_20/last_30) for the market header.
+- **POST /rig/{id}** — rent a rig. Body: `{ length: <hours>, profileid: <id> }`
+  (documented in `backend/services/mrrRenter.js` header comment).
+- Pool profile env vars (already set): `MRR_POOL_PROFILE_EQUIHASH`,
+  `MRR_POOL_PROFILE_KHEAVYHASH`, `MRR_POOL_PROFILE_SCRYPT`,
+  `MRR_POOL_PROFILE_RANDOMX` — pass the matching profileid per algorithm.
+
+## Backend changes
+
+### New file `backend/controllers/operatorController.js`
+Routes (all behind `requireAuth` from `../middleware/auth`):
+
+- **GET /api/operator/market?algo=kheavyhash|scrypt|equihash|randomx**
+  - Gate: `req.auth.wallet` must equal `process.env.OPERATOR_WALLET` (lowercase
+    compare). No OPERATOR_WALLET set → 403 with a clear message.
+  - Fetch `GET /rig?type=<algo>&limit=50` from MRR via the request helper in
+    `backend/services/mrrRenter.js` (reuse `makeMrrRequest`).
+  - Enrich: `usd_per_hour = price.BTC.hour × btcUsd` (use the priceOracle
+    helper already used elsewhere, e.g. `getBtcUsdcPrice()` — check
+    `backend/services/priceOracle.js` for the exported name and reuse it; it
+    has a TTL cache — do NOT hit it per rig, fetch once per request).
+  - Per rig return: `{ rig_id, name, owner, region, rpi, available (status
+    available && !rented && online), hashrate_nice (advertised.nice),
+    hashrate_ghs (advertised converted to GH/s), usd_per_hour,
+    usd_min_rental (price.BTC.minhrs × btcUsd), min_hours
+    (price.BTC.min_rental_length), extensions, pool_profile_id (env for the
+    algo) }`.
+  - Apply the hashrate floor filters already defined in
+    `backend/services/mrrRenter.js` (HASH_TYPE_TO_BASE / min advertised
+    hashrate per algo — reuse that logic, do not re-invent).
+  - **Best-value pick**: among `available === true` rigs, prefer rpi >= 90
+    (skip `rpi === 'new'` if any qualified rigs exist); rank by
+    `usd_per_ghs_day = (usd_per_hour × 24) / hashrate_ghs`; return
+    `{ rig_id, name, usd_per_ghs_day, usd_per_day, hashrate_ghs, rpi,
+       min_hours, usd_min_rental, reason }` where reason is a plain-English
+    sentence built from the numbers (e.g. "Cheapest delivered cost:
+    $0.0041/GH·day at 215 GH/s ≈ $0.88/day, rpi 99.2, 3h minimum").
+    Also return the market header stats (available rigs, total available
+    hash, lowest/last_10 USD per GH·day) from /info/algos.
+  - Response shape: `{ algo, generated_at, best_value, rigs: [...top 25
+    sorted by usd_per_ghs_day...], market_stats }`.
+
+- **POST /api/operator/order** body `{ rig_id, algo, length_hours }`
+  - Gate: same OPERATOR_WALLET check.
+  - `length_hours` must be >= rig `min_rental_length` and <=
+    `MRR_MAX_RENTAL_HOURS` (default 72, env).
+  - **MUST go through the order outbox pipeline** (crash-safety — see
+    `backend/services/orderOutboxWorker.js` and `hashrate_orders` table from
+    migration 021): insert a `hashrate_orders` row (status PENDING,
+    marketplace 'MRR', algorithm = the algo's uppercase room name
+    (KASPA/ZCASH/LTC_DOGE/XMR — match existing convention), requested rig id,
+    length_hours, profileid from the env map, operator wallet as the user).
+    Do NOT debit USDC, do NOT charge a protocol fee, do NOT create the rig or
+    capacity slice inline — the outbox worker already handles placement and
+    activates the rig + RENTAL slice + rig_rentals row on success (reuse
+    exactly that path; the worker must not require a USDC balance).
+  - Return `202 { status: 'PENDING', order_id }` (same shape the existing
+    upgrade endpoint returns) so the frontend can poll.
+
+- **GET /api/operator/orders** (optional, same gate): recent operator
+  hashrate_orders with status, for the panel's "my orders" list.
+
+Reuse as much of `backend/services/mrrRenter.js` and the outbox worker as
+possible. Do NOT modify `upgradeController.js`, `rewardsController.js`,
+deposits, the game, or the player USDC flow.
+
+## Frontend changes
+
+### New file `frontend/src/components/MarketPanel.jsx`
+- Rendered in `App.jsx` ONLY when `auth.wallet` (lowercased) equals
+  `OPERATOR_WALLET` (pass via `import.meta.env.VITE_OPERATOR_WALLET` with the
+  value from the backend env; hide when absent). Place it above the room
+  cards, below the GamePanel.
+- Algo tabs (KAS / LTC / ZEC / XMR). On select, fetch
+  `/api/operator/market?algo=...` with the Bearer token.
+- Header: market stats (available rigs, available hash, lowest USD/GH·day).
+- Best-value callout: "⭐ Best value: {rig name} — {reason}".
+- Table: rig name, hashrate, USD/hour, USD min rental, min hours, extensions,
+  RPI, region, availability, and a **"Rent"** button per available rig.
+- Rent flow: click → prompt/confirm length (default = rig min hours, max 72)
+  → POST `/api/operator/order` → show "Order placed (pending)" with the order
+  id; disabled while pending; poll `/api/operator/orders` or refresh on
+  interval to show PLACED/FAILED.
+- All prices in USD (cents, e.g. `$0.88/day`). No USDC anywhere in this panel.
+- Follow the existing component style (see MiningRoomCard.jsx / GamePanel.jsx,
+  CSS in index.css with BEM-ish classes, dark theme vars).
+
+## Constraints
+
+- No migrations. No new npm dependencies. No randomness. No fabricated
+  numbers — every figure comes from the live MRR API and the price oracle.
+- Do NOT touch: player USDC purchase flow (upgradeRig/buySession), rewards,
+  deposits, withdrawals, the game (023), auth, migrations 001–023.
+- Keep the full test suite green (currently 161 tests) + `npm run build` +
+  `git diff --check`. Add tests for the operator gate (403 without
+  OPERATOR_WALLET / wrong wallet), the market ranking logic (pure function:
+  filters + usd_per_ghs_day sort + best-value pick), and the order insert
+  (PENDING row, no USDC debit, worker path mocked).
+- Do NOT commit, do NOT deploy, do NOT restart anything.
+
+## Operator note (paste-ready for Kevin)
+
+After review + deploy, set `OPERATOR_WALLET=0x181a33d257e4d660144c0ac5ac0754fe00f0e28d`
+(and optionally `VITE_OPERATOR_WALLET` for the frontend build) in the droplet
+.env, rebuild the frontend, restart nexus.service. The Market panel then
+appears only on the operator's wallet login. Operator rents are charged
+directly to the MRR BTC balance (no USDC), with USD display.
