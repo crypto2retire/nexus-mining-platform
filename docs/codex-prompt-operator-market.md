@@ -80,8 +80,40 @@ Routes (all behind `requireAuth` from `../middleware/auth`):
     $0.0041/GH·day at 215 GH/s ≈ $0.88/day, rpi 99.2, 3h minimum").
     Also return the market header stats (available rigs, total available
     hash, lowest/last_10 USD per GH·day) from /info/algos.
-  - Response shape: `{ algo, generated_at, best_value, rigs: [...top 25
-    sorted by usd_per_ghs_day...], market_stats }`.
+  - **P/L scenario engine (Kevin 2026-08-21: "does the dashboard include p/l
+    for all scenarios when setting up a new miner?" — YES, it must)**. For
+    EVERY rig, compute a deterministic P/L block from the platform's OWN
+    observed production anchors (ground truth — NOT WhatToMine, which is
+    license-restricted and must never be wired in):
+    - Anchor table (env-overridable, verified fleet rates 2026-08-21, the
+      platform's real delivery per algo — this bakes in the ZEC equihash
+      ~57% delivery gap automatically):
+      `KASPA: 200 GH/s → 1.3832 KAS/day; ZCASH: 30.55 kSol/s → 0.002060
+      ZEC/day; XMR: 14.25 kH/s → 0.000479 XMR/day; LTC_DOGE: 7 GH/s →
+      0.007304 LTC/day + 28.69 DOGE/day (merged)`.
+    - Per-rig: `revenue_day = (hashrate_ghs / anchor_ghs) × anchor_production
+      × live_spot` (LTC_DOGE = LTC revenue + DOGE revenue). Live spot from
+      CoinGecko simple price with a short TTL cache (the priceOracle is
+      BTC/USDC only — fetch coin spots in this controller; cache 60s).
+    - `net_day = revenue_day − usd_per_day (cost)`.
+    - **Scenarios** (all with shown arithmetic in the payload):
+      `net_current`, `net_plus10`, `net_minus10`, `net_plus25`,
+      `net_minus25` (spot multipliers), `break_even_price` (= spot ×
+      cost_day / revenue_day), and per-length rows for
+      `[min_hours, 24, 48, 72]`: `{length_hours, total_cost,
+      expected_value, net}`.
+    - **Trend**: fetch 24h + 7d % change per coin (CoinGecko
+      `/coins/markets?price_change_percentage=24h,7d`, same cache) and attach
+      `price_trend {price, chg_24h, chg_7d}` to the response — Kevin's
+      mandatory report columns.
+    - Primary sort for the table = `net_day` (delivery-adjusted P/L) at
+      current price, with `usd_per_ghs_day` shown as the secondary
+      cost-transparency metric. Best-value reason sentence must cite the P/L
+      numbers, e.g. "≈ +$0.31/day net at current ZEC price (break-even
+      $610 — 17% below spot)".
+  - Response shape: `{ algo, generated_at, price_trend, best_value, rigs:
+    [...top 25 sorted by net_day... each with cost + P/L scenario block +
+    per-length rows], market_stats }`.
 
 - **POST /api/operator/order** body `{ rig_id, algo, length_hours }`
   - Gate: same OPERATOR_WALLET check.
@@ -116,10 +148,21 @@ deposits, the game, or the player USDC flow.
   cards, below the GamePanel.
 - Algo tabs (KAS / LTC / ZEC / XMR). On select, fetch
   `/api/operator/market?algo=...` with the Bearer token.
-- Header: market stats (available rigs, available hash, lowest USD/GH·day).
-- Best-value callout: "⭐ Best value: {rig name} — {reason}".
-- Table: rig name, hashrate, USD/hour, USD min rental, min hours, extensions,
-  RPI, region, availability, and a **"Rent"** button per available rig.
+- Header: market stats (available rigs, available hash, lowest USD/GH·day)
+  plus the coin price + trend row (`price_trend`: price, 24h, 7d with
+  up/down arrows — green when positive, red when negative).
+- Best-value callout: "⭐ Best value: {rig name} — {reason}" where the reason
+  cites the P/L numbers (net/day at current price + break-even price).
+- Table columns: rig name, hashrate, USD/hour, USD/day cost, **net $/day
+  (delivery-adjusted P/L at current price, green/red)**, break-even price,
+  min hours, extensions, RPI, region, and a **"Rent"** button per available
+  rig.
+- Expandable per-rig "P/L scenarios" row: shows the arithmetic
+  (`revenue = {ghs} × {anchor} = {coin}/day × ${price} = ${rev}/day −
+  ${cost}/day = ${net}/day`), the ±10%/±25% scenario nets, and the
+  per-length table (min_hours / 24h / 48h / 72h: total cost, expected value,
+  net).
+- All prices in USD. No USDC anywhere in this panel.
 - Rent flow: click → prompt/confirm length (default = rig min hours, max 72)
   → POST `/api/operator/order` → show "Order placed (pending)" with the order
   id; disabled while pending; poll `/api/operator/orders` or refresh on
@@ -137,8 +180,12 @@ deposits, the game, or the player USDC flow.
 - Keep the full test suite green (currently 161 tests) + `npm run build` +
   `git diff --check`. Add tests for the operator gate (403 without
   OPERATOR_WALLET / wrong wallet), the market ranking logic (pure function:
-  filters + usd_per_ghs_day sort + best-value pick), and the order insert
-  (PENDING row, no USDC debit, worker path mocked).
+  filters + usd_per_ghs_day sort + best-value pick), **the P/L scenario math
+  (pure function: anchor scaling → revenue_day, net_day, ±10/±25 scenarios,
+  break-even price = spot × cost/revenue, per-length totals — assert exact
+  numbers for a KAS 200 GH/s rig: 1.3832 KAS/day × spot, and a ZEC z9-class
+  rig at the 57%-delivery anchor)**, and the order insert (PENDING row, no
+  USDC debit, worker path mocked).
 - Do NOT commit, do NOT deploy, do NOT restart anything.
 
 ## Operator note (paste-ready for Kevin)
