@@ -27,7 +27,7 @@ const { upgradeRig } = require('../controllers/upgradeController');
 const REAL_ENV = { ...process.env };
 const WALLET = '0x1111111111111111111111111111111111111111';
 
-function makeClient({ balance = 1000, hasRig = false, coins = 0 } = {}) {
+function makeClient({ balance = 1000, hasRig = false, rigLevel = 1, coins = 0 } = {}) {
   const queries = [];
   const client = {
     query: jest.fn(async (sql, params = []) => {
@@ -44,7 +44,7 @@ function makeClient({ balance = 1000, hasRig = false, coins = 0 } = {}) {
       }
       if (sql.includes('SELECT rig_id')) {
         return hasRig
-          ? { rowCount: 1, rows: [{ rig_id: 'rig-1', level: 1, virtual_hashrate: 10 }] }
+          ? { rowCount: 1, rows: [{ rig_id: 'rig-1', level: rigLevel, virtual_hashrate: 10 }] }
           : { rowCount: 0, rows: [] };
       }
       if (sql.includes('INSERT INTO hashrate_orders')) {
@@ -178,6 +178,29 @@ describe('upgradeRig — currency conversion + order loop', () => {
     expect(res.body.discount_pct).toBe(15);
     expect(res.body.discounted_cost).toBe(17);
     expect(res.body.btc_spent).toBe(0.0001615);
+  });
+
+  test('renew charges the ACTUAL tier cost — no multi-coin discount (Kevin 2026-08-22)', async () => {
+    const { client } = makeClient({ hasRig: true, rigLevel: 2, coins: 4 });
+    pool.connect.mockResolvedValue(client);
+
+    const res = makeRes();
+    await upgradeRig(req({ renew: true }), res);
+
+    expect(res.body.success).toBe(true);
+    // ZCASH tier 2 = $20. Renewal ignores the 15% loyalty discount entirely.
+    expect(res.body.discount_pct).toBe(0);
+    expect(res.body.discounted_cost).toBe(20);
+    expect(res.body.protocol_fee_usdc).toBe(1); // 5% of 20
+    expect(res.body.btc_spent).toBe(0.00019); // 19 / 100000
+
+    // Balance deducted the FULL tier cost: 1000 - 20 = 980.
+    const balanceUpdate = client.query.mock.calls.find(([sql]) => sql.includes('UPDATE user_wallets'));
+    expect(balanceUpdate[1][0]).toBe(980);
+
+    // Order row books the full tier cost.
+    const orderInsert = client.query.mock.calls.find(([sql]) => sql.includes('INSERT INTO hashrate_orders'));
+    expect(orderInsert[1][3]).toBe(20);
   });
 
   test('insufficient balance: 400, no order placed, no deduction', async () => {

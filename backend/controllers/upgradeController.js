@@ -247,6 +247,10 @@ async function upgradeRig(req, res) {
       await client.query('ROLLBACK');
       return res.status(400).json({ error: renew ? 'No active rental to renew — rent a miner first' : 'Already at max level' });
     }
+    // Renewals are the SAME product re-rented — the actual tier cost with NO
+    // loyalty discount (Kevin 2026-08-22: renew shows real cost, no
+    // discounts). The multi-coin discount applies to new purchases only.
+    if (renew) discountPct = 0;
     discountedCost = toSatPrecision(nextTier.cost * (1 - discountPct / 100));
     if (Number(wallet.usdc_balance) < discountedCost) {
       await client.query('ROLLBACK');

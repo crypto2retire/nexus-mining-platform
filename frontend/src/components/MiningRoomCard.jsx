@@ -139,9 +139,9 @@ export default function MiningRoomCard({
             className={`btn-primary ${animating ? 'pulse' : ''}`}
             onClick={() => pulse(() => onRenew(pool))}
             disabled={!renewCost}
-            title={renewCost ? `Rent ${COIN_NAMES[pool] || pool} hashrate for another ${RENTAL_HOURS}h${discountPct > 0 ? ` — ${discountPct}% multi-coin discount applied` : ''}` : 'Rental not renewable'}
+            title={renewCost ? `Renew ${COIN_NAMES[pool] || pool} hashrate for another ${RENTAL_HOURS}h — actual renewal cost, no discounts` : 'Rental not renewable'}
           >
-            {renewCost != null ? `${rentalActive ? 'Renew' : 'Rent again'} ${RENTAL_HOURS}h — ${price(renewCost)}${discountLabel}` : 'Unavailable'}
+            {renewCost != null ? `${rentalActive ? 'Renew' : 'Rent again'} ${RENTAL_HOURS}h — $${Number(renewCost).toFixed(2)}` : 'Unavailable'}
           </button>
         ) : (
           <button
