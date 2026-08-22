@@ -367,8 +367,29 @@ body {
 
 .mining-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 1rem;
+}
+
+/* Responsive hardening (2026-08-22): grid items must be allowed to shrink so
+   wide tables scroll INSIDE their container instead of blowing out the page
+   (admin tables were bare <table> elements — the page could not scroll). */
+.mining-grid > *,
+.admin-grid > *,
+.summary-row > * {
+  min-width: 0;
+}
+
+.admin-card {
+  overflow-x: auto;
+  min-width: 0;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+}
+
+.market-table-wrap,
+.payout-history-table-wrap {
+  -webkit-overflow-scrolling: touch;
 }
 
 .payout-history {
@@ -1171,6 +1192,9 @@ button:disabled {
   .wallet-auth {
     justify-content: flex-start;
   }
+  .container {
+    padding: 1rem;
+  }
   .summary-row {
     grid-template-columns: 1fr;
   }
@@ -1189,6 +1213,31 @@ button:disabled {
   }
   .market-summary {
     grid-template-columns: 1fr 1fr;
+  }
+}
+
+/* Phones (2026-08-22): stack everything, keep tabs wrappable/scrollable. */
+@media (max-width: 480px) {
+  .container {
+    padding: 0.75rem;
+  }
+  .market-summary {
+    grid-template-columns: 1fr;
+  }
+  .mining-grid {
+    grid-template-columns: 1fr;
+  }
+  .card-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .game-stats {
+    gap: 0.5rem;
+  }
+  .wallet-auth-message {
+    max-width: 100%;
+  }
+  .market-tabs button {
+    padding: 0.5rem 0.65rem;
   }
 }
 

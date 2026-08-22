@@ -426,6 +426,7 @@ Expected: PASS for state transitions, concurrency, refunds, ambiguous outcomes, 
 - [ ] **Step 1: Add the signed-in navigation state in `App.jsx`**
 
 Introduce a local view state with `dashboard` and `connect`. Render a small signed-in navigation control and mount `<ConnectPanel auth={auth} />` only when Connect is selected. Do not change session restoration or duplicate `/api/auth/me`.
+**Responsive nav (Kevin 2026-08-22 — the app must fit computers, tablets, and phones):** the nav row must never force horizontal page overflow — use `flex-wrap: wrap` (or `overflow-x: auto` with `-webkit-overflow-scrolling: touch` for a scrollable pill bar) so the menu fits or scrolls within the displayed area on any screen. Same for any tab rows. Reference the responsive hardening already in `index.css` (`.admin-card { overflow-x: auto }`, `.mining-grid > * { min-width: 0 }`, the ≤768px and ≤480px media tiers).
 
 - [ ] **Step 2: Implement API/error utilities and disabled state**
 
