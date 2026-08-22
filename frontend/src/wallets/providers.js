@@ -96,27 +96,24 @@ export function getAvailableWallets() {
     addProvider(providers, seen, entry.provider);
   }
 
-  const counts = new Map();
-  const mapped = providers.map((provider) => {
+  // Dedupe by BASE brand id BEFORE any suffixing: Rabby exposes multiple
+  // provider objects (window.ethereum + its own multi-provider list), each
+  // resolving to the same 'rabby' identity. Deduping on the suffixed id
+  // ('rabby' vs 'rabby-2') let both survive — the "Rabby Wallet 2" bug.
+  const seenIds = new Set();
+  const unique = [];
+  for (const provider of providers) {
     const identity = identityForProvider(provider);
-    const count = (counts.get(identity.id) || 0) + 1;
-    counts.set(identity.id, count);
-    return {
-      id: count === 1 ? identity.id : `${identity.id}-${count}`,
-      name: count === 1 ? identity.name : `${identity.name} ${count}`,
-      icon: identity.icon,
-      provider,
-    };
-  });
-
-  // Dedupe by brand id: the same wallet can be discovered through multiple
-  // paths (window.ethereum, window.<brand>.ethereum, eip6963) with different
-  // provider objects — show ONE chooser entry per wallet. First provider wins.
-  const byId = new Map();
-  for (const entry of mapped) {
-    if (!byId.has(entry.id)) byId.set(entry.id, entry);
+    if (seenIds.has(identity.id)) continue;
+    seenIds.add(identity.id);
+    unique.push({ identity, provider });
   }
-  return [...byId.values()];
+  return unique.map(({ identity, provider }) => ({
+    id: identity.id,
+    name: identity.name,
+    icon: identity.icon,
+    provider,
+  }));
 }
 
 export function getWalletById(id) {
