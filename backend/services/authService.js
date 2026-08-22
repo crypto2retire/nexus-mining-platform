@@ -26,7 +26,12 @@ function jwtSecret() {
 
 async function createChallenge(wallet) {
   const normalized = normalizeWallet(wallet);
-  const nonce = crypto.randomBytes(32).toString('hex');
+  // Nonce is prefixed so it is NOT a bare hex string: hex-looking messages
+  // make some wallets (Rabby, "Unknown Signature Type") sign a different
+  // message format than ethers.verifyMessage expects -> "Invalid wallet
+  // signature" (hit live 2026-08-22). "nexus-auth:" makes it plain text on
+  // every EIP-1193 wallet; the exact string is what gets signed AND verified.
+  const nonce = 'nexus-auth:' + crypto.randomBytes(24).toString('hex');
   const result = await pool.query(
     `INSERT INTO auth_nonces (wallet_address, nonce, expires_at)
      VALUES ($1, $2, CURRENT_TIMESTAMP + INTERVAL '5 minutes')

@@ -98,7 +98,7 @@ describe('wallet authentication service', () => {
     process.env = originalEnv;
   });
 
-  test('challenge creates a one-time 32-byte nonce that expires in five minutes', async () => {
+  test('challenge creates a one-time text-prefixed nonce that expires in five minutes', async () => {
     configureNonceStore();
     const wallet = Wallet.createRandom().address.toLowerCase();
 
@@ -106,7 +106,10 @@ describe('wallet authentication service', () => {
     const challenge = await createChallenge(wallet);
     const after = Date.now();
 
-    expect(challenge.nonce).toMatch(/^[a-f0-9]{64}$/);
+    // Text prefix (nexus-auth:) keeps wallets from hex-interpreting the
+    // message — a bare hex nonce caused Rabby "Unknown Signature Type" and
+    // "Invalid wallet signature" (2026-08-22).
+    expect(challenge.nonce).toMatch(/^nexus-auth:[a-f0-9]{48}$/);
     expect(new Date(challenge.expires_at).getTime()).toBeGreaterThanOrEqual(before + 5 * 60 * 1000);
     expect(new Date(challenge.expires_at).getTime()).toBeLessThanOrEqual(after + 5 * 60 * 1000);
     const [sql, params] = pool.query.mock.calls[0];
