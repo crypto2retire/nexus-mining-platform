@@ -28,8 +28,8 @@ reasons below — they are the real reasons from the product history.
   - All `/api/*` routes unchanged.
   - The SPA's assets (dist/assets/*) must still load — keep the same static
     middleware, mounted so both pages can use it.
-- Add a simple in-page anchor nav (no routing library): Why rent / How it
-  works / Get Bitcoin / FAQ.
+- Add a simple in-page anchor nav (no routing library): Why rent / Why mine
+  / Taxes / How it works / Get Bitcoin / FAQ.
 - Match the existing dark theme (use the SPA's CSS variables as inspiration:
   #0b0d12 bg, #141820 surface, #22d3ee accent — but self-contained CSS in the
   landing page; do NOT import the SPA bundle).
@@ -83,6 +83,48 @@ Honest counterbalance (must appear, word-for-word intent):
 > costs MORE than simply buying them. We show you that number on every rig
 > ("Mine vs Buy"). We would rather you see the real math than promise a
 > profit that is not there.
+
+### Section: Why mine instead of buy-and-hold (#why-mine)
+
+Intro: Buying and holding is not the only way to get crypto. Mining is a
+different way to accumulate coins, and some people prefer it. Here is why —
+none of it is a promise of profit.
+
+- **You get coins an exchange cannot sell you.** Some mineable coins —
+  Kaspa is the big one — are not available on major US exchanges. Mining is
+  one of the only ways to hold them.
+- **Coins go straight to your wallet.** Payouts come from the pool to the
+  payout address you provide. No exchange holds your coins, no middleman
+  sits between you and what you mine.
+- **You accumulate in small, regular amounts.** Instead of timing one big
+  purchase, you earn coins continuously as payouts cross each pool's floor —
+  a form of dollar-cost averaging that happens automatically.
+- **You set your own cost basis by mining.** Your tax basis is the fair
+  market value on the day the pool pays you — not an exchange price you
+  have no control over.
+
+### Section: Taxes (#taxes)
+
+Intro: Mining can have a different tax treatment than buying — which is an
+advantage for some people, especially anyone running crypto as a business.
+This is general information, NOT tax advice: **always consult an
+accountant** about your situation, and tax rules for crypto are changing.
+
+- **Mining costs can be deductible.** If you mine as a business, the costs
+  of producing coins — hashrate rentals, electricity, hardware, internet —
+  are business expenses that can offset mining income (e.g., Schedule C).
+  Renting hashrate is a simpler paper trail than buying and depreciating
+  hardware.
+- **Mined coins are income at fair market value on the day you receive
+  them.** The pool payout is ordinary income at the coin's price that day,
+  and that price is your tax basis for later sales.
+- **A later sale below that basis is a capital loss.** Losses can offset
+  other capital gains, which can soften the tax hit from other investments.
+- **No wash-sale rule for crypto (as of now).** Unlike stocks, you can sell
+  a coin and immediately repurchase it without losing the loss deduction.
+  This may change — new broker-reporting rules are rolling out.
+- **Keep records.** Pool statements, payout addresses, and the price of each
+  coin on each payout day are what an accountant needs to file correctly.
 
 ### Section: How it works (#how-it-works)
 
@@ -141,12 +183,21 @@ Honest counterbalance (must appear, word-for-word intent):
 7. **Do you promise returns?** No. We show the current market math on every
    rig. Mining can cost more than buying, and we want you to see that before
    you spend anything.
+8. **Are there tax advantages to mining instead of buying?** Possibly —
+   mining costs can be deductible business expenses, mined coins are taxed
+   as income at their value on the day you receive them, and a later sale
+   below that value can be a capital loss that offsets other gains. This is
+   general information, not tax advice: consult an accountant.
+9. **Is mining or buying cheaper right now?** At current market prices,
+   mining most coins costs more than buying them. We show the exact
+   mine-vs-buy number on every rig so you can decide for yourself.
 
 ### Footer
 
 - Product: Nexus Mining Engine. Virtual cloud-mining accounting layer; no
   native token; 5% connection fee.
-- Links: Why rent / How it works / Get Bitcoin / FAQ (same-page anchors).
+- Links: Why rent / Why mine / Taxes / How it works / Get Bitcoin / FAQ
+  (same-page anchors).
 - Honest line: "Cryptocurrency mining is risky and may lose money. Nothing
   on this page is financial advice or a promise of returns."
 - Domain placeholder comment for the canonical URL.
@@ -156,7 +207,8 @@ Honest counterbalance (must appear, word-for-word intent):
 - One H1 per page, natural keyword phrasing (no stuffing): "rent mining
   hashrate", "rent bitcoin miner", "hashrate rental", "mine without buying
   hardware", "self-custody mining", "Kaspa/Zcash/Bitcoin mining rental",
-  "cloud mining alternative", "paid directly to your wallet".
+  "cloud mining alternative", "paid directly to your wallet", "mine instead
+  of buy", "crypto mining tax advantages".
 - FAQPage JSON-LD schema (same Q&A text as the visible FAQ).
 - Organization + WebSite JSON-LD (name Nexus Mining Engine, no invented
   addresses/phone numbers — omit contact info entirely rather than fake it).
