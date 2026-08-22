@@ -64,11 +64,51 @@ export default function MarketPanel({ auth }) {
   const [message, setMessage] = useState('');
   const [orderingRig, setOrderingRig] = useState('');
   const [expanded, setExpanded] = useState('');
+  const [sortKey, setSortKey] = useState('net_day');
+  const [sortDir, setSortDir] = useState('desc');
 
   const headers = useMemo(() => ({
     'Content-Type': 'application/json',
     Authorization: `Bearer ${auth.token}`,
   }), [auth.token]);
+
+  // Column definitions: key -> { label, accessor, defaultDir }
+  const COLUMNS = {
+    name: { label: 'Rig', accessor: (r) => String(r.name || '').toLowerCase(), defaultDir: 'asc' },
+    hashrate: { label: 'Hashrate', accessor: (r) => Number(r.hashrate_ghs) || 0, defaultDir: 'desc' },
+    usd_per_hour: { label: 'USD/hr', accessor: (r) => Number(r.usd_per_hour) || 0, defaultDir: 'asc' },
+    usd_per_day: { label: 'Cost/day', accessor: (r) => Number(r.usd_per_day) || 0, defaultDir: 'asc' },
+    usd_min_rental: { label: 'Min rent', accessor: (r) => Number(r.usd_min_rental) || 0, defaultDir: 'asc' },
+    net_day: { label: 'Net/day', accessor: (r) => Number(r.profitability?.net_day) || 0, defaultDir: 'desc' },
+    break_even: { label: 'Break-even', accessor: (r) => {
+        const v = Number(r.profitability?.break_even_price);
+        return Number.isFinite(v) && v > 0 ? v : Number.POSITIVE_INFINITY;
+      }, defaultDir: 'asc' },
+    min_hours: { label: 'Min', accessor: (r) => Number(r.min_hours) || 0, defaultDir: 'asc' },
+    rpi: { label: 'RPI', accessor: (r) => Number(r.rpi) || 0, defaultDir: 'desc' },
+    region: { label: 'Region', accessor: (r) => String(r.region || '').toLowerCase(), defaultDir: 'asc' },
+  };
+
+  const sortedRigs = useMemo(() => {
+    const col = COLUMNS[sortKey] || COLUMNS.net_day;
+    const dir = sortDir === 'asc' ? 1 : -1;
+    return [...(market?.rigs || [])].sort((a, b) => {
+      const va = col.accessor(a);
+      const vb = col.accessor(b);
+      if (va === vb) return String(a.rig_id).localeCompare(String(b.rig_id));
+      if (typeof va === 'string' || typeof vb === 'string') return String(va).localeCompare(String(vb)) * dir;
+      return (va - vb) * dir;
+    });
+  }, [market, sortKey, sortDir]);
+
+  const requestSort = (key) => {
+    if (sortKey === key) {
+      setSortDir((current) => (current === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      setSortDir(COLUMNS[key]?.defaultDir || 'asc');
+    }
+  };
 
   const fetchOrders = async () => {
     const response = await fetch(`${API_BASE}/api/operator/orders`, { headers });
@@ -187,14 +227,7 @@ export default function MarketPanel({ auth }) {
 
       {market && !loading && (
         <>
-          <div className="market-summary">
-            <div className="stat"><span className="stat-label">Available rigs</span><span className="stat-value">{market.market_stats?.available_rigs ?? '—'}</span></div>
-            <div className="stat"><span className="stat-label">Available hash</span><span className="stat-value">{market.market_stats?.available_hash_nice || '—'}</span></div>
-            <div className="stat"><span className="stat-label">Lowest cost</span><span className="stat-value">{money(market.market_stats?.lowest_usd_per_ghs_day, 4)}/GH·day</span></div>
-            <div className="stat"><span className="stat-label">Last 10</span><span className="stat-value">{money(market.market_stats?.last_10_usd_per_ghs_day, 4)}/GH·day</span></div>
-          </div>
-
-          <div className="market-trends" aria-label="Coin price trends">
+          <div className="market-trends" aria-label="Current token prices">
             {(market.price_trend || []).map((trend) => (
               <div key={trend.coin} className="market-trend">
                 <strong>{trend.coin} {money(trend.price, 4)}</strong>
@@ -202,6 +235,14 @@ export default function MarketPanel({ auth }) {
                 <span className={trendClass(trend.chg_7d)}>7d {percent(trend.chg_7d)}</span>
               </div>
             ))}
+          </div>
+
+          <div className="market-summary">
+            <div className="stat"><span className="stat-label">Available rigs</span><span className="stat-value">{market.market_stats?.available_rigs ?? '—'}</span></div>
+            <div className="stat"><span className="stat-label">Available hash</span><span className="stat-value">{market.market_stats?.available_hash_nice || '—'}</span></div>
+            <div className="stat"><span className="stat-label">Lowest cost</span><span className="stat-value">{money(market.market_stats?.lowest_usd_per_ghs_day, 4)}/GH·day</span></div>
+            <div className="stat"><span className="stat-label">Last 10</span><span className="stat-value">{money(market.market_stats?.last_10_usd_per_ghs_day, 4)}/GH·day</span></div>
+            <div className="stat"><span className="stat-label">Sort</span><span className="stat-value">{COLUMNS[sortKey]?.label} {sortDir === 'asc' ? '▲' : '▼'}</span></div>
           </div>
 
           {market.best_value ? (
@@ -214,13 +255,18 @@ export default function MarketPanel({ auth }) {
             <table className="market-table">
               <thead>
                 <tr>
-                  <th>Rig</th><th>Hashrate</th><th>USD/hour</th><th>USD/day</th>
-                  <th>Net/day</th><th>Break-even</th><th>Min</th><th>Ext.</th>
-                  <th>RPI</th><th>Region</th><th>Action</th>
+                  {Object.entries(COLUMNS).map(([key, col]) => (
+                    <th key={key} aria-sort={sortKey === key ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}>
+                      <button type="button" className="market-sort" onClick={() => requestSort(key)}>
+                        {col.label} {sortKey === key ? (sortDir === 'asc' ? '▲' : '▼') : ''}
+                      </button>
+                    </th>
+                  ))}
+                  <th>Ext.</th><th>Action</th>
                 </tr>
               </thead>
               <tbody>
-                {(market.rigs || []).map((rig) => {
+                {sortedRigs.map((rig) => {
                   const pending = pendingRigIds.has(String(rig.rig_id));
                   const open = expanded === rig.rig_id;
                   const net = Number(rig.profitability?.net_day);
@@ -234,12 +280,13 @@ export default function MarketPanel({ auth }) {
                       <td>{rig.hashrate_nice || `${Number(rig.hashrate_ghs).toPrecision(4)} GH/s`}</td>
                       <td>{money(rig.usd_per_hour, 4)}</td>
                       <td>{money(rig.usd_per_day)}</td>
+                      <td>{money(rig.usd_min_rental, 4)}</td>
                       <td className={net >= 0 ? 'market-positive' : 'market-negative'}>{signedMoney(net)}</td>
                       <td>{money(rig.profitability?.break_even_price, 4)}</td>
                       <td>{rig.min_hours}h</td>
-                      <td>{rig.extensions ? 'Yes' : 'No'}</td>
                       <td>{rig.rpi ?? '—'}</td>
                       <td>{rig.region || '—'}</td>
+                      <td>{rig.extensions ? 'Yes' : 'No'}</td>
                       <td>
                         <button
                           className="btn-primary market-rent"
@@ -253,7 +300,7 @@ export default function MarketPanel({ auth }) {
                     </tr>,
                     open && (
                       <tr className="market-scenarios" key={`${rig.rig_id}-scenarios`}>
-                        <td colSpan="11">
+                        <td colSpan="12">
                           <p>{arithmeticText(rig)}</p>
                           <div className="market-scenario-grid">
                             <span>−25% <strong>{signedMoney(rig.profitability.net_minus25)}</strong></span>
