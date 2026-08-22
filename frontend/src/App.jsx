@@ -9,6 +9,7 @@ import MarketPanel from './components/MarketPanel';
 import PayoutHistory from './components/PayoutHistory';
 import ConnectPanel from './components/ConnectPanel';
 import OperatorMinersPanel from './components/OperatorMinersPanel';
+import WtmPanel from './components/WtmPanel';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 const VALID_WALLET_RE = /^0x[a-f0-9]{40}$/i;
@@ -332,6 +333,7 @@ export default function App() {
 
         {!restoringSession && auth && data && <GamePanel auth={auth} />}
         {!restoringSession && auth && data && isOperator && <OperatorMinersPanel auth={auth} />}
+        {!restoringSession && auth && data && isOperator && <WtmPanel auth={auth} />}
         {!restoringSession && auth && data && isOperator && <MarketPanel auth={auth} />}
 
         {data && (

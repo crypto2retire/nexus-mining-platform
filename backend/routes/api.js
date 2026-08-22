@@ -50,6 +50,43 @@ router.post('/operator/order', requireAuth, createOrder);
 router.get('/operator/orders', requireAuth, listOrders);
 // Per-miner dashboard for the rigs the operator holds (2026-08-22).
 router.get('/operator/miners', requireAuth, getOperatorMiners);
+// WhatToMine verification + coin scan — OPERATOR ONLY (Kevin 2026-08-22;
+// free API is not commercially licensed — user-facing use requires the paid tier).
+router.get('/operator/wtm/verify', requireAuth, async (req, res) => {
+  if (!operatorAllowed(req, res)) return res;
+  try {
+    const { rows } = await pool.query(
+      'SELECT user_id FROM users WHERE LOWER(wallet_address) = $1',
+      [String(req.auth.wallet).toLowerCase()]
+    );
+    if (rows.length === 0) return res.status(404).json({ error: 'Operator user not found' });
+    const { verifyAnchors } = require('../services/whattomineService');
+    return res.json(await verifyAnchors(rows[0].user_id));
+  } catch (err) {
+    const cfg = /not configured/.test(err.message);
+    return res.status(cfg ? 503 : 502).json({ error: err.message });
+  }
+});
+router.get('/operator/wtm/scan', requireAuth, async (req, res) => {
+  if (!operatorAllowed(req, res)) return res;
+  try {
+    const { scanProfitable } = require('../services/whattomineService');
+    return res.json(await scanProfitable());
+  } catch (err) {
+    const cfg = /not configured/.test(err.message);
+    return res.status(cfg ? 503 : 502).json({ error: err.message });
+  }
+});
+router.get('/operator/wtm/coins', requireAuth, async (req, res) => {
+  if (!operatorAllowed(req, res)) return res;
+  try {
+    const { screenCoins } = require('../services/whattomineService');
+    return res.json(await screenCoins());
+  } catch (err) {
+    const cfg = /not configured/.test(err.message);
+    return res.status(cfg ? 503 : 502).json({ error: err.message });
+  }
+});
 router.post('/rigs/upgrade', requireAuth, upgradeRig);
 // HYBRID: short hashrate sessions drawn from the room's spare capacity.
 router.post('/rigs/session', requireAuth, buySession);

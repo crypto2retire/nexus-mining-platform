@@ -1433,6 +1433,9 @@ button:disabled {
   font-size: 0.75rem;
   font-style: italic;
 }
+.wtm-mirage td {
+  opacity: 0.55;
+}
 
 /* ============ Direct-to-wallet Connect ============ */
 .app-nav {
