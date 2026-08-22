@@ -7,17 +7,12 @@ const COIN_NAMES = {
   BTC: 'BTC',
 };
 
-// Per-coin hashrate unit matching the REAL rigs: ZEC is KH/s-scale, KAS/LTC
-// are GH/s-scale, and BTC is TH/s-scale. The game no longer sells "25 GH/s of
-// everything" — credits are denominated in the room's real unit.
-const POOL_UNITS = { ZCASH: 'KH/s', KASPA: 'GH/s', LTC_DOGE: 'GH/s', BTC: 'TH/s' };
-
 const RENTAL_HOURS = 72;
 
 export default function MiningRoomCard({
   title, pool, rig, pendingReward, rentCost, renewCost,
   onRent, onRenew, onClaim, onWithdraw, onReinvest,
-  discountPct, pendingDoge, payoutStatus, backing,
+  discountPct, pendingDoge, payoutStatus,
 }) {
   const [animating, setAnimating] = useState(false);
   const [, setNow] = useState(Date.now());
@@ -91,28 +86,10 @@ export default function MiningRoomCard({
             </span>
           </div>
         )}
-        <div
-          className="stat"
-          title="Total hashrate ACTUALLY mining this room right now — the combined hashrate of every renter on this coin's rigs."
-        >
-          <span className="stat-label">Pool hashrate · all renters</span>
-          <span className="stat-value">
-            {backing?.real_hash != null
-              ? `${Number(backing.real_hash).toFixed(4)} ${backing.real_unit || POOL_UNITS[pool] || 'GH/s'}`
-              : '—'}
-          </span>
+        <div className="stat">
+          <span className="stat-label">Window left</span>
+          <span className="stat-value accent">{fmt(hoursLeft)}</span>
         </div>
-        {rentalActive ? (
-          <div className="stat">
-            <span className="stat-label">Window left</span>
-            <span className="stat-value accent">{fmt(hoursLeft)}</span>
-          </div>
-        ) : (
-          <div className="stat">
-            <span className="stat-label">Window</span>
-            <span className="stat-value">{RENTAL_HOURS}h per rent</span>
-          </div>
-        )}
         <div className="stat">
           <span className="stat-label">Your pending payout</span>
           <span className="stat-value accent">{Number(pendingReward).toFixed(8)}</span>

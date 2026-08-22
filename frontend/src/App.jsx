@@ -375,7 +375,6 @@ export default function App() {
                   discountPct={data.multi_coin?.discount_pct ?? 0}
                   pendingDoge={data.pending_rewards_2?.[pool.key] ?? 0}
                   payoutStatus={data.payout_status?.[pool.key] ?? null}
-                  backing={data.backing?.[pool.key] ?? null}
                 />
               ))}
             </section>

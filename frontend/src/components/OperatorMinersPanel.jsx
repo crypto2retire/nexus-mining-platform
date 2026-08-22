@@ -41,6 +41,13 @@ function pnlClass(value) {
 
 const POOL_LABELS = { ZCASH: 'Zcash (ZEC)', KASPA: 'Kaspa (KAS)', LTC_DOGE: 'LTC / DOGE', BTC: 'Bitcoin (BTC)', XMR: 'Monero (XMR)' };
 
+/**
+ * My Miners — per-rig dashboard for the rigs the operator holds.
+ * 🔒 SELF-CUSTODY ONLY (Kevin 2026-08-22): every number is the user's OWN —
+ * their rigs, their hashrate, their wallet's rewards, their time remaining.
+ * Nothing is pooled; per-rig P/L is ESTIMATED from the rig's production math
+ * because pools report per-wallet, not per-rig.
+ */
 export default function OperatorMinersPanel({ auth }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
@@ -72,8 +79,6 @@ export default function OperatorMinersPanel({ auth }) {
 
   useEffect(() => {
     load();
-    // Silent 60s refresh keeps time-left and current P/L honest without
-    // hammering the API; the manual button forces an immediate refresh.
     const id = setInterval(load, 60000);
     return () => clearInterval(id);
   }, [load, refreshTick]);
@@ -106,12 +111,12 @@ export default function OperatorMinersPanel({ auth }) {
       {data && (
         <>
           <p className="admin-miner">
-            <strong>Combined:</strong>{' '}
+            <strong>Your rigs:</strong>{' '}
             {poolKeys.reduce((s, k) => s + (pools[k].active_rentals || 0), 0)} active rental
             {poolKeys.reduce((s, k) => s + (pools[k].active_rentals || 0), 0) === 1 ? '' : 's'} across{' '}
-            {poolKeys.length} coin{poolKeys.length === 1 ? '' : 's'} · Overall P/L{' '}
-            <span className={pnlClass(poolKeys.reduce((s, k) => s + (pools[k].pnl_overall_usd || 0), 0))}>
-              {signedUsd(poolKeys.reduce((s, k) => s + (pools[k].pnl_overall_usd || 0), 0))}
+            {poolKeys.length} coin{poolKeys.length === 1 ? '' : 's'} · Est. overall P/L{' '}
+            <span className={pnlClass(poolKeys.reduce((s, k) => s + (pools[k].est_pnl_overall_usd || 0), 0))}>
+              {signedUsd(poolKeys.reduce((s, k) => s + (pools[k].est_pnl_overall_usd || 0), 0))}
             </span>
             <span className="admin-freshness">
               {' '}
@@ -119,8 +124,8 @@ export default function OperatorMinersPanel({ auth }) {
             </span>
           </p>
           <p className="admin-miner admin-note">
-            Earned amounts are split pro-rata by advertised hashrate-hours — pool payouts are shared by every rig
-            mining that coin, so no single rig can be tagged exactly.
+            Self-custody: every number is your own. Rewards accrue to your own wallet at the pool; per-rig P/L is
+            estimated from the rig&apos;s production math at current difficulty — pools report per-wallet, not per-rig.
           </p>
 
           {poolKeys.map((key) => {
@@ -137,17 +142,18 @@ export default function OperatorMinersPanel({ auth }) {
                     </span>
                   </div>
                   <div className="miner-card-totals">
-                    <span title="Combined hashrate of active rentals">
+                    <span title="Combined hashrate of your active rigs">
                       <strong>{Number(p.total_hashrate).toFixed(4)}</strong> {p.unit}
                     </span>
-                    <span title="Mined value so far (settled + pool unpaid)">
-                      mined <strong>{usd(p.mined_value_usd)}</strong>
+                    <span title={`What the pool currently owes YOUR wallet (${p.your_rewards_unit}) — self-custody rewards`}>
+                      your rewards{' '}
+                      <strong>{p.your_rewards_coin != null ? `${coinAmount(p.your_rewards_coin)} ${p.your_rewards_unit}` : '—'}</strong>
                     </span>
-                    <span title="Current P/L on active rentals (earned so far − cost so far)">
-                      now <strong className={pnlClass(p.pnl_current_usd)}>{signedUsd(p.pnl_current_usd)}</strong>
+                    <span title="Estimated current P/L on active rigs (est. earned so far − cost so far)">
+                      now <strong className={pnlClass(p.est_pnl_current_usd)}>{signedUsd(p.est_pnl_current_usd)}</strong>
                     </span>
-                    <span title="Overall P/L on the coin (all rentals)">
-                      coin <strong className={pnlClass(p.pnl_overall_usd)}>{signedUsd(p.pnl_overall_usd)}</strong>
+                    <span title="Estimated overall P/L on the coin (all your rentals)">
+                      coin <strong className={pnlClass(p.est_pnl_overall_usd)}>{signedUsd(p.est_pnl_overall_usd)}</strong>
                     </span>
                   </div>
                 </summary>
@@ -158,13 +164,13 @@ export default function OperatorMinersPanel({ auth }) {
                   <thead>
                     <tr>
                       <th>Miner</th>
-                      <th>Hashrate</th>
+                      <th>Your hashrate</th>
                       <th>Est. payout (window)</th>
                       <th>Time left</th>
                       <th>Cost</th>
-                      <th>Earned</th>
-                      <th>Current P/L</th>
-                      <th>Overall P/L (miner)</th>
+                      <th>Est. earned so far</th>
+                      <th>Est. current P/L</th>
+                      <th>Est. overall P/L (miner)</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -183,21 +189,21 @@ export default function OperatorMinersPanel({ auth }) {
                         </td>
                         <td>{m.status === 'ACTIVE' ? fmtHours(m.hours_left) : 'ended'}</td>
                         <td title={`${m.cost_btc != null ? `${m.cost_btc} BTC at rental time` : ''}`}>{usd(m.cost_usd)}</td>
-                        <td title={`${coinAmount(m.earned_coin_1)} ${p.coin}${m.earned_coin_2 ? ` + ${coinAmount(m.earned_coin_2)} DOGE` : ''}`}>
-                          {usd(m.earned_usd)}
+                        <td title="Estimated value mined so far this window at current prices — actual rewards land in your wallet">
+                          {usd(m.est_earned_usd)}
                         </td>
-                        <td className={pnlClass(m.pnl_current_usd)}>{signedUsd(m.pnl_current_usd)}</td>
-                        <td className={pnlClass(m.pnl_overall_miner_usd)}>{signedUsd(m.pnl_overall_miner_usd)}</td>
+                        <td className={pnlClass(m.est_pnl_current_usd)}>{signedUsd(m.est_pnl_current_usd)}</td>
+                        <td className={pnlClass(m.est_pnl_overall_miner_usd)}>{signedUsd(m.est_pnl_overall_miner_usd)}</td>
                       </tr>
                     ))}
                   </tbody>
                   <tfoot>
                     <tr className="miner-total-row">
-                      <td colSpan="4">Coin overall</td>
+                      <td colSpan="4">Coin overall (est.)</td>
                       <td>{usd(p.total_cost_usd)}</td>
-                      <td>{usd(p.earned_allocated_usd)}</td>
-                      <td className={pnlClass(p.pnl_current_usd)}>{signedUsd(p.pnl_current_usd)}</td>
-                      <td className={pnlClass(p.pnl_overall_usd)}>{signedUsd(p.pnl_overall_usd)}</td>
+                      <td>—</td>
+                      <td className={pnlClass(p.est_pnl_current_usd)}>{signedUsd(p.est_pnl_current_usd)}</td>
+                      <td className={pnlClass(p.est_pnl_overall_usd)}>{signedUsd(p.est_pnl_overall_usd)}</td>
                     </tr>
                   </tfoot>
                 </table>
