@@ -75,7 +75,7 @@ function addProvider(providers, seen, provider) {
   providers.push(provider);
 }
 
-export function getAvailableWallets() {
+function getDiscoveredProviders() {
   if (typeof window === 'undefined') return [];
 
   const providers = [];
@@ -96,6 +96,12 @@ export function getAvailableWallets() {
     addProvider(providers, seen, entry.provider);
   }
 
+  return providers;
+}
+
+export function getAvailableWallets() {
+  const providers = getDiscoveredProviders();
+
   // Dedupe by BASE brand id BEFORE any suffixing: Rabby exposes multiple
   // provider objects (window.ethereum + its own multi-provider list), each
   // resolving to the same 'rabby' identity. Deduping on the suffixed id
@@ -114,6 +120,58 @@ export function getAvailableWallets() {
     icon: identity.icon,
     provider,
   }));
+}
+
+function sourcePathsFor(provider) {
+  const sources = [];
+  const injected = window.ethereum;
+
+  if (Array.isArray(injected?.providers)) {
+    injected.providers.forEach((candidate, index) => {
+      if (candidate === provider) sources.push(`window.ethereum.providers[${index}]`);
+    });
+  }
+  if (injected === provider) sources.push('window.ethereum');
+  if (window.trustwallet === provider) sources.push('window.trustwallet');
+  if (window.phantom?.ethereum === provider) sources.push('window.phantom.ethereum');
+  if (window.coinbaseWalletExtension === provider) sources.push('window.coinbaseWalletExtension');
+  if ((window.__eip6963Providers || []).some((entry) => entry.provider === provider)) {
+    sources.push('eip6963');
+  }
+
+  return sources;
+}
+
+// Deliberately excludes accounts, addresses, request payloads, and internal
+// provider fields. This is safe to print when diagnosing chooser identity.
+export function getWalletDiagnostics() {
+  if (typeof window === 'undefined') return [];
+
+  const providers = getDiscoveredProviders();
+  const seen = new Set(providers);
+  // Trust documents window.trustwallet as a legacy brand-global. Inspect it
+  // without adding it to the chooser so this diagnostic remains behavior-free.
+  addProvider(providers, seen, window.trustwallet);
+
+  return providers.map((provider) => {
+    const { id, name } = identityForProvider(provider);
+    const announcement = (window.__eip6963Providers || [])
+      .find((entry) => entry.provider === provider);
+    return {
+      id,
+      name,
+      source: sourcePathsFor(provider).join(', ') || 'unknown',
+      flags: {
+        isTrust: provider.isTrust,
+        isPhantom: provider.isPhantom,
+        isCoinbaseWallet: provider.isCoinbaseWallet,
+        isRabby: provider.isRabby,
+        isMetaMask: provider.isMetaMask,
+      },
+      eip6963: Boolean(announcement),
+      rdns: announcement?.info?.rdns || null,
+    };
+  });
 }
 
 export function getWalletById(id) {

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import {
   getAvailableWallets,
   getWalletById,
+  getWalletDiagnostics,
   WALLET_PROVIDER_STORAGE_KEY,
 } from '../wallets/providers';
 
@@ -29,6 +30,9 @@ export default function WalletAuth({ auth, onAuthChange }) {
 
   useEffect(() => {
     if (!chooserOpen) return undefined;
+    for (const diagnostic of getWalletDiagnostics()) {
+      console.info('[wallets]', diagnostic);
+    }
     dialogRef.current?.focus();
     const dismissOnEscape = (event) => {
       if (event.key === 'Escape') setChooserOpen(false);
