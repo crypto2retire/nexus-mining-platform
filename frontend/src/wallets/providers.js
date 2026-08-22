@@ -74,7 +74,7 @@ export function getAvailableWallets() {
   }
 
   const counts = new Map();
-  return providers.map((provider) => {
+  const mapped = providers.map((provider) => {
     let identity = identityFor(provider);
     // Fall back to the EIP-6963 announcement metadata when the provider has
     // no brand flags (e.g. Trust Wallet extension).
@@ -100,6 +100,15 @@ export function getAvailableWallets() {
       provider,
     };
   });
+
+  // Dedupe by brand id: the same wallet can be discovered through multiple
+  // paths (window.ethereum, window.<brand>.ethereum, eip6963) with different
+  // provider objects — show ONE chooser entry per wallet. First provider wins.
+  const byId = new Map();
+  for (const entry of mapped) {
+    if (!byId.has(entry.id)) byId.set(entry.id, entry);
+  }
+  return [...byId.values()];
 }
 
 export function getWalletById(id) {
