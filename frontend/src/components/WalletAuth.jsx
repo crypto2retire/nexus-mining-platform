@@ -37,6 +37,18 @@ export default function WalletAuth({ auth, onAuthChange }) {
     return () => window.removeEventListener('keydown', dismissOnEscape);
   }, [chooserOpen]);
 
+  // EIP-6963 wallets (e.g. Trust Wallet extension) announce asynchronously
+  // after the page loads — refresh the chooser when one arrives.
+  useEffect(() => {
+    const refreshWallets = () => {
+      const next = getAvailableWallets();
+      setWallets(next);
+      setSelectedWallet((current) => current || next[0] || null);
+    };
+    window.addEventListener('nexus:walletsChanged', refreshWallets);
+    return () => window.removeEventListener('nexus:walletsChanged', refreshWallets);
+  }, []);
+
   const signIn = async (walletChoice) => {
     setBusy(true);
     setError('');
