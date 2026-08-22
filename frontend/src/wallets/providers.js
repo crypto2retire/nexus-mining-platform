@@ -46,6 +46,26 @@ function identityFor(provider) {
   };
 }
 
+// Brand is decided by the EIP-6963 announcement FIRST (rdns is authoritative
+// — e.g. com.trustwallet.app). Some providers carry compat flags for OTHER
+// wallets (Trust Wallet can expose isMetaMask/isRabby), so flag matching
+// alone misidentifies them (Trust showed as a 2nd "Rabby"). Flags are the
+// fallback for legacy injectors with no announcement.
+function identityForProvider(provider) {
+  const entry = (window.__eip6963Providers || []).find((e) => e.provider === provider);
+  const rdns = entry?.info?.rdns;
+  if (rdns) {
+    const knownId = EIP6963_RDNS_IDS[rdns];
+    if (knownId) {
+      const base = WALLET_IDENTITIES.find((i) => i.id === knownId);
+      if (base) return base;
+    }
+    const name = String(entry?.info?.name || '').trim();
+    if (name) return { id: `eip6963-${rdns}`, name, icon: name.charAt(0).toUpperCase() };
+  }
+  return identityFor(provider);
+}
+
 function addProvider(providers, seen, provider) {
   if (!provider || typeof provider.request !== 'function' || seen.has(provider)) return;
   seen.add(provider);
@@ -75,22 +95,7 @@ export function getAvailableWallets() {
 
   const counts = new Map();
   const mapped = providers.map((provider) => {
-    let identity = identityFor(provider);
-    // Fall back to the EIP-6963 announcement metadata when the provider has
-    // no brand flags (e.g. Trust Wallet extension).
-    if (identity.id === 'eip1193') {
-      const entry = (window.__eip6963Providers || []).find((e) => e.provider === provider);
-      const info = entry?.info;
-      if (info?.name) {
-        const name = String(info.name).trim();
-        const icon = name ? name.charAt(0).toUpperCase() : 'W';
-        identity = {
-          id: EIP6963_RDNS_IDS[info.rdns] || `eip6963-${info.rdns || name.toLowerCase()}`,
-          name,
-          icon,
-        };
-      }
-    }
+    const identity = identityForProvider(provider);
     const count = (counts.get(identity.id) || 0) + 1;
     counts.set(identity.id, count);
     return {
