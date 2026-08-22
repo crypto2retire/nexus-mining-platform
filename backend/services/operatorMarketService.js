@@ -11,12 +11,12 @@ const COIN_CACHE_TTL_MS = 60000;
 const ALGO_CONFIG = {
   kheavyhash: {
     targetPool: 'KASPA', profileSuffix: 'KHEAVYHASH', primaryCoin: 'KAS',
-    coins: { KAS: { id: 'kaspa', production: 1.3832 } },
+    coins: { KAS: { id: 'kaspa', production: 0.60 } },
     anchorGhs: 200,
   },
   equihash: {
     targetPool: 'ZCASH', profileSuffix: 'EQUIHASH', primaryCoin: 'ZEC',
-    coins: { ZEC: { id: 'zcash', production: 0.002060 } },
+    coins: { ZEC: { id: 'zcash', production: 0.0007 } },
     anchorGhs: 30.55e-6,
   },
   sha256: {

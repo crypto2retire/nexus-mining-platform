@@ -73,7 +73,7 @@ function mockMarket() {
   });
   configFor.mockReturnValue({
     anchorGhs: 30.55e-6, // GH/s anchor for equihash
-    coins: { ZEC: { id: 'zcash', production: 0.002060 } },
+    coins: { ZEC: { id: 'zcash', production: 0.0007 } },
   });
 }
 
@@ -102,12 +102,12 @@ describe('buildOperatorMiners — self-custody model', () => {
     const zec = result.pools.ZCASH;
     const a = zec.miners.find((m) => m.mrr_rental_id === '1001');
     const b = zec.miners.find((m) => m.mrr_rental_id === '1002');
-    // 445 KH/s → 445e-6 GH/s ÷ 30.55e-6 × 0.002060 ZEC/day × (14h left /24)
+    // 445 KH/s → 445e-6 GH/s ÷ 30.55e-6 × 0.0007 ZEC/day × (14h left /24)
     const scaleA = (445 * 1e-6) / 30.55e-6;
-    expect(a.est_payout_coin_1).toBeCloseTo(scaleA * 0.002060 * (14 / 24), 1);
+    expect(a.est_payout_coin_1).toBeCloseTo(scaleA * 0.0007 * (14 / 24), 1);
     // Rig B: 14.92×... 475 KH/s, 19h left
     const scaleB = (475 * 1e-6) / 30.55e-6;
-    expect(b.est_payout_coin_1).toBeCloseTo(scaleB * 0.002060 * (19 / 24), 1);
+    expect(b.est_payout_coin_1).toBeCloseTo(scaleB * 0.0007 * (19 / 24), 1);
     expect(a.est_payout_usd).toBeCloseTo(a.est_payout_coin_1 * 100, 0);
   });
 
@@ -117,7 +117,7 @@ describe('buildOperatorMiners — self-custody model', () => {
     const a = zec.miners.find((m) => m.mrr_rental_id === '1001');
     // A: 10h elapsed of 24h → est earned = scale×0.00206×(10/24)×$100
     const scaleA = (445 * 1e-6) / 30.55e-6;
-    const estEarned = scaleA * 0.002060 * (10 / 24) * 100;
+    const estEarned = scaleA * 0.0007 * (10 / 24) * 100;
     const costSoFar = 10 * (10 / 24);
     expect(a.cost_so_far_usd).toBeCloseTo(costSoFar, 4);
     expect(a.est_pnl_current_usd).toBeCloseTo(estEarned - costSoFar, 4);
@@ -133,14 +133,14 @@ describe('buildOperatorMiners — self-custody model', () => {
     const prev = zec.miners.find((m) => m.mrr_rental_id === '0999');
     // Rig A overall = est earned (active) + est full-window (ended) − 10 − 9
     const scaleA = (445 * 1e-6) / 30.55e-6;
-    const activeEarned = scaleA * 0.002060 * (10 / 24) * 100;
-    const endedEarned = scaleA * 0.002060 * (6 / 24) * 100; // full 6h window
+    const activeEarned = scaleA * 0.0007 * (10 / 24) * 100;
+    const endedEarned = scaleA * 0.0007 * (6 / 24) * 100; // full 6h window
     expect(a.est_pnl_overall_miner_usd).toBeCloseTo(activeEarned + endedEarned - 19, 4);
     expect(prev.est_pnl_overall_miner_usd).toBeCloseTo(a.est_pnl_overall_miner_usd, 4);
     // Rig B is its own group.
     const b = zec.miners.find((m) => m.mrr_rental_id === '1002');
     const scaleB = (475 * 1e-6) / 30.55e-6;
-    expect(b.est_pnl_overall_miner_usd).toBeCloseTo(scaleB * 0.002060 * (5 / 24) * 100 - 12, 4);
+    expect(b.est_pnl_overall_miner_usd).toBeCloseTo(scaleB * 0.0007 * (5 / 24) * 100 - 12, 4);
   });
 
   it('reports time left, hours-left=0 for ended, and per-rig cost', async () => {

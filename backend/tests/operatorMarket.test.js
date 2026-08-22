@@ -31,20 +31,23 @@ test('KAS profitability scales the observed 200 GH/s anchor and all scenarios ex
     spots: { KAS: 0.2 },
   });
 
-  expect(result.arithmetic.production_day.KAS).toBeCloseTo(1.3832, 12);
-  expect(result.revenue_day).toBeCloseTo(0.27664, 12);
+  expect(result.arithmetic.production_day.KAS).toBeCloseTo(0.60, 12);
+  // Re-anchored 2026-08-22 from live HeroMiners accrual: 0.577 KAS over
+  // 57.9h at 75 GH/s → 0.239/day → per 200 GH/s anchor = 0.60.
+  // revenue_day = 0.60 × $0.20 = $0.12
+  expect(result.revenue_day).toBeCloseTo(0.12, 12);
   expect(result.cost_day).toBeCloseTo(2.4, 12);
-  expect(result.net_current).toBeCloseTo(-2.12336, 12);
-  expect(result.net_plus10).toBeCloseTo((0.27664 * 1.1) - 2.4, 12);
-  expect(result.net_minus10).toBeCloseTo((0.27664 * 0.9) - 2.4, 12);
-  expect(result.net_plus25).toBeCloseTo((0.27664 * 1.25) - 2.4, 12);
-  expect(result.net_minus25).toBeCloseTo((0.27664 * 0.75) - 2.4, 12);
-  expect(result.break_even_price).toBeCloseTo(2.4 / 1.3832, 12);
+  expect(result.net_current).toBeCloseTo(-2.28, 12);
+  expect(result.net_plus10).toBeCloseTo((0.12 * 1.1) - 2.4, 12);
+  expect(result.net_minus10).toBeCloseTo((0.12 * 0.9) - 2.4, 12);
+  expect(result.net_plus25).toBeCloseTo((0.12 * 1.25) - 2.4, 12);
+  expect(result.net_minus25).toBeCloseTo((0.12 * 0.75) - 2.4, 12);
+  expect(result.break_even_price).toBeCloseTo(2.4 / 0.60, 12);
   expect(result.lengths.find((row) => row.length_hours === 24)).toEqual({
     length_hours: 24,
     total_cost: 2.4,
-    expected_value: 0.27664,
-    net: expect.closeTo(-2.12336, 12),
+    expected_value: 0.12,
+    net: expect.closeTo(-2.28, 12),
   });
 });
 
@@ -58,10 +61,13 @@ test('ZEC profitability uses the observed 30.55 kSol/s delivery anchor', () => {
   });
 
   expect(result.arithmetic.anchor_ghs).toBeCloseTo(0.00003055, 14);
-  expect(result.arithmetic.production_day.ZEC).toBeCloseTo(0.002060, 12);
-  expect(result.revenue_day).toBeCloseTo(0.0824, 12);
-  expect(result.net_current).toBeCloseTo(0.0584, 12);
-  expect(result.break_even_price).toBeCloseTo(0.024 / 0.002060, 12);
+  // Re-anchored 2026-08-22 from live 2Miners accrual: 0.010395 ZEC/24h at
+  // 444.2 kSol/s avg → per 30.55 kSol/s anchor = 0.0007 ZEC/day.
+  expect(result.arithmetic.production_day.ZEC).toBeCloseTo(0.0007, 12);
+  // revenue_day = 0.0007 × $40 = $0.028
+  expect(result.revenue_day).toBeCloseTo(0.028, 12);
+  expect(result.net_current).toBeCloseTo(0.004, 12);
+  expect(result.break_even_price).toBeCloseTo(0.024 / 0.0007, 12);
 });
 
 test('BTC profitability uses the verified 500 TH/s production anchor', () => {
