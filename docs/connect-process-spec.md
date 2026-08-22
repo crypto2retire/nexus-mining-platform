@@ -54,11 +54,27 @@ directly" therefore means one of:
 
 ## Decision: Option B — CONFIRMED (Kevin 2026-08-22)
 
-**Chosen:** Option B — user sends the amount needed to pay the miner; a
-smart contract forwards it to fund the MRR rental. **Rejected:** Option A —
-API access to a user's MRR account gives us access to their account and
-funds (draining risk); with Option B we have **no access to user funds or
-wallets at any time**.
+**Chosen:** **Architecture 1 — BTC direct + contract for the separate 5%
+fee.** User sends BTC straight from their wallet to the MRR funding address;
+we never touch it. A non-custodial Base/USDC contract handles the 5% fee as
+a separate payment (+ optional escrow later). **Rejected:** Option A — API
+access to a user's MRR account gives us access to their account and funds
+(draining risk). Kevin: "with the 2nd option we have no access to the users
+funds or wallets at any time."
+
+### Verified MRR building blocks (probed live 2026-08-22)
+- `GET /account` → `deposit.BTC.address` = **`bc1qspu59c6ucq5773cyxe089v93ftm9whx8s9cux2`**
+  (the account's BTC deposit address — display this; stable per account)
+- `GET /account/balance` → `{BTC: {confirmed, unconfirmed}}` — real-time
+  deposit detection
+- `GET /account/transactions` → rows typed `Deposit` (positive, **with
+  txid**), `Payment`, `Rental Fee`, `Credit/Refund` — full audit + refund
+  precedent (MRR itself issues Credit/Refund rows)
+- Refund of a user's deposit = withdraw BTC from the MRR account back to the
+  user's address (MRR web UI / address book; manual operator action — same
+  pattern as the existing withdrawal queue)
+- BTC is the right on-ramp coin: Venmo + CashApp sell it in-app — easiest
+  first-crypto purchase path for new users (Kevin 2026-08-22)
 
 ### Why B is legally stronger (analysis Kevin reviewed, 2026-08-22)
 - **FinCEN four-factor test (2019 guidance)** — money-transmitter factors
