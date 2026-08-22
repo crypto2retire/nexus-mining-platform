@@ -17,7 +17,7 @@ const RENTAL_HOURS = 72;
 export default function MiningRoomCard({
   title, pool, rig, pendingReward, rentCost, renewCost,
   onRent, onRenew, onClaim, onWithdraw, onReinvest,
-  discountPct, pendingDoge, payoutStatus,
+  discountPct, pendingDoge, payoutStatus, backing,
 }) {
   const [animating, setAnimating] = useState(false);
   const [, setNow] = useState(Date.now());
@@ -94,6 +94,17 @@ export default function MiningRoomCard({
         <div className="stat" title="The hashrate assigned to your active miner rental.">
           <span className="stat-label">Your miner hashrate</span>
           <span className="stat-value">{Number(hashrate).toFixed(4)} {POOL_UNITS[pool] || 'GH/s'}</span>
+        </div>
+        <div
+          className="stat"
+          title="Total hashrate ACTUALLY mining this room right now — includes player-backed rentals AND operator-funded orders (e.g. from the Mining Market). Your credited hashrate is the line above."
+        >
+          <span className="stat-label">Real pool hashrate</span>
+          <span className="stat-value">
+            {backing?.real_hash != null
+              ? `${Number(backing.real_hash).toFixed(4)} ${backing.real_unit || POOL_UNITS[pool] || 'GH/s'}`
+              : '—'}
+          </span>
         </div>
         {rentalActive ? (
           <div className="stat">

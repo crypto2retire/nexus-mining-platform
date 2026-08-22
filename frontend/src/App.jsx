@@ -7,6 +7,7 @@ import WalletAuth, { AUTH_STORAGE_KEY } from './components/WalletAuth';
 import GamePanel from './components/GamePanel';
 import MarketPanel from './components/MarketPanel';
 import PayoutHistory from './components/PayoutHistory';
+import ConnectPanel from './components/ConnectPanel';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 const VALID_WALLET_RE = /^0x[a-f0-9]{40}$/i;
@@ -68,6 +69,7 @@ function useAnimatedPending(pendingByPool) {
 
 export default function App() {
   const [auth, setAuth] = useState(storedAuth);
+  const [activeView, setActiveView] = useState('dashboard');
   const [restoringSession, setRestoringSession] = useState(true);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -116,6 +118,7 @@ export default function App() {
     if (nextAuth) {
       fetchDashboard(nextAuth.wallet);
     } else {
+      setActiveView('dashboard');
       setData(null);
     }
   };
@@ -293,6 +296,32 @@ export default function App() {
         {error && <div className="error-banner">{error}</div>}
         {(restoringSession || (loading && !data)) && <div className="loading">Loading wallet session…</div>}
 
+        {!restoringSession && auth && (
+          <nav className="app-nav" aria-label="Player dashboard">
+            <button
+              type="button"
+              className={activeView === 'dashboard' ? 'active' : ''}
+              aria-current={activeView === 'dashboard' ? 'page' : undefined}
+              onClick={() => setActiveView('dashboard')}
+            >
+              Dashboard
+            </button>
+            <button
+              type="button"
+              className={activeView === 'connect' ? 'active' : ''}
+              aria-current={activeView === 'connect' ? 'page' : undefined}
+              onClick={() => setActiveView('connect')}
+            >
+              Connect
+            </button>
+          </nav>
+        )}
+
+        {!restoringSession && auth && activeView === 'connect' && <ConnectPanel auth={auth} />}
+
+        {activeView === 'dashboard' && (
+          <>
+
         {!restoringSession && !auth && !error && (
           <div className="empty-wallet-banner">
             Sign in with your browser wallet to view your account and authorize purchases, claims, and withdrawals.
@@ -344,6 +373,7 @@ export default function App() {
                   discountPct={data.multi_coin?.discount_pct ?? 0}
                   pendingDoge={data.pending_rewards_2?.[pool.key] ?? 0}
                   payoutStatus={data.payout_status?.[pool.key] ?? null}
+                  backing={data.backing?.[pool.key] ?? null}
                 />
               ))}
             </section>
@@ -353,6 +383,8 @@ export default function App() {
         )}
 
         {!restoringSession && <AdminPanel refreshKey={dataVersion} />}
+          </>
+        )}
       </main>
 
       <footer className="footer">
