@@ -203,9 +203,11 @@ function bestReason(rig, config, spots) {
     ? 'break-even unavailable'
     : `break-even $${breakEven.toFixed(4)}${delta === null ? '' : ` — ${delta.toFixed(1)}% ${direction} spot`}`;
   const rpi = String(rig.rpi ?? '').trim();
-  const rpiNote = /^new$/i.test(rpi) || !(Number(rpi) >= 90)
+  const rpiNote = /^new$/i.test(rpi)
     ? ' — unrated rig on MRR (no track record yet)'
-    : '';
+    : !(Number(rpi) >= 90)
+      ? ` — low-rated rig on MRR (rpi ${rpi})`
+      : '';
   return `≈ ${netText} net at current ${config.primaryCoin} price (${breakEvenText})${rpiNote}`;
 }
 

@@ -144,6 +144,29 @@ test('market ranking filters junk, surfaces the true best available rig (even un
   expect(result.rigs[0].usd_per_ghs_day).toBeLessThan(result.rigs[1].usd_per_ghs_day);
 });
 
+test('best-value reason distinguishes low-rated (rpi < 90) from unrated (rpi new)', () => {
+  const lowRatedRig = {
+    ...KAS_RIG,
+    id: 'low-rated',
+    name: 'Low rated rig',
+    rpi: '53.17',
+    price: { BTC: { ...KAS_RIG.price.BTC, hour: '0.0000005', minhrs: '0.0000015' } },
+  };
+  const verifiedRig = { ...KAS_RIG, id: 'verified', name: 'Verified rig' };
+
+  const result = buildMarketView({
+    records: [lowRatedRig, verifiedRig],
+    algo: 'kheavyhash',
+    btcUsd: 100000,
+    spots: { KAS: 0.2 },
+    profileId: '957805',
+  });
+
+  expect(result.best_value.rig_id).toBe('low-rated');
+  expect(result.best_value.reason).toMatch(/low-rated rig on MRR \(rpi 53\.17\)/);
+  expect(result.best_value.reason).not.toMatch(/unrated/);
+});
+
 test('market header converts MRR unit-day prices and available hash to GH/s', () => {
   const stats = marketStatsFor({
     algo: 'kheavyhash',
