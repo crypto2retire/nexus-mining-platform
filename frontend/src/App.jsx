@@ -121,7 +121,7 @@ export default function App() {
   };
 
   // RENT: pay USDC (or reinvested tokens) to rent hashrate for a 72h window.
-  // `renew=true` re-rents the current tier; otherwise rents the next tier.
+  // `renew=true` repeats the current rental configuration.
   const rent = async (pool, { renew = false } = {}) => {
     try {
       setError('');
@@ -146,36 +146,8 @@ export default function App() {
         : '';
       alert(
         renew
-          ? `🔄 Rental renewed! ${result.level} tier → ${result.hashrate} ${result.unit || 'GH/s'} for ${result.rig_hours || 72}h${expires}${summary}`
-          : `🎉 Rented! ${result.level} tier → ${result.hashrate} ${result.unit || 'GH/s'} for ${result.rig_hours || 72}h${expires}${summary}`
-      );
-      await fetchDashboard();
-    } catch (err) {
-      setError(err.message);
-    }
-  };
-
-  // BUY SESSION: a short hashrate slice (1h-24h, the pool's tier-2 slot in its
-  // REAL unit — ZEC 10 KH/s, KAS 25 GH/s, LTC 5 GH/s, BTC 50 TH/s) drawn from the
-  // room's SPARE real capacity — no new marketplace rental, the rig is already
-  // running. Higher markup = shorter session. Idempotent like rent.
-  const SESSION_SLOT = { ZCASH: 10, KASPA: 25, LTC_DOGE: 5, BTC: 50 };
-  const buySession = async (pool, hours) => {
-    try {
-      setError('');
-      const requestId = crypto.randomUUID
-        ? crypto.randomUUID()
-        : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      const res = await fetch(`${API_BASE}/api/rigs/session`, {
-        method: 'POST',
-        headers: authHeaders(),
-        body: JSON.stringify({ target_pool: pool, request_id: requestId, hours, ghs: SESSION_SLOT[pool] || 25 }),
-      });
-      const result = await apiResult(res, 'Session purchase failed');
-      alert(
-        `⏱ Session rented! ${result.ghs} ${result.unit || 'GH/s'} for ${result.hours}h — $${Number(result.price).toFixed(2)}\n` +
-          `Window: until ${new Date(result.rental_expires_at).toLocaleString()}\n` +
-          `Room spare left: ${Number(result.room_spare_ghs ?? 0).toFixed(1)} ${result.unit || 'GH/s'}`
+          ? `🔄 Rental renewed! ${result.hashrate} ${result.unit || 'GH/s'} for ${result.rig_hours || 72}h${expires}${summary}`
+          : `🎉 Rented! ${result.hashrate} ${result.unit || 'GH/s'} for ${result.rig_hours || 72}h${expires}${summary}`
       );
       await fetchDashboard();
     } catch (err) {
@@ -205,7 +177,7 @@ export default function App() {
         : '';
       alert(
         `🔄 Reinvested ${Number(result.reinvested_usdc || 0).toFixed(2)} USDC of mined tokens — ` +
-        `rented tier ${result.level} (${result.hashrate} ${result.unit || 'GH/s'}) for ${result.rig_hours || 72}h${summary}`
+        `rented ${result.hashrate} ${result.unit || 'GH/s'} for ${result.rig_hours || 72}h${summary}`
       );
       await fetchDashboard();
     } catch (err) {
@@ -341,7 +313,7 @@ export default function App() {
                   {data.deposit_address || 'Deposit address unavailable — contact support'}
                 </div>
                 <span className="fund-hint">
-                  Balance updates within ~1 minute of the transfer. Then upgrade any mine to start earning.
+                  Balance updates within ~1 minute of the transfer. Then rent any miner to start earning.
                 </span>
               </div>
             )}
@@ -362,20 +334,16 @@ export default function App() {
                   pool={pool.key}
                   rig={data.rigs[pool.key]}
                   pendingReward={animated[pool.key] || data.pending_rewards[pool.key] || 0}
-                  upgradeCost={data.upgrade_cost?.[pool.key] ?? null}
+                  rentCost={data.upgrade_cost?.[pool.key] ?? null}
                   renewCost={data.renew_cost?.[pool.key] ?? null}
-                  onUpgrade={() => rent(pool.key)}
+                  onRent={() => rent(pool.key)}
                   onRenew={() => rent(pool.key, { renew: true })}
                   onClaim={claim}
                   onWithdraw={withdraw}
                   onReinvest={reinvest}
                   discountPct={data.multi_coin?.discount_pct ?? 0}
                   pendingDoge={data.pending_rewards_2?.[pool.key] ?? 0}
-                  realBacking={data.backing?.[pool.key] ?? null}
                   payoutStatus={data.payout_status?.[pool.key] ?? null}
-                  sessionPrices={data.session_prices?.[pool.key] ?? null}
-                  spareGhs={data.spare_ghs?.[pool.key] ?? null}
-                  onBuySession={(hours) => buySession(pool.key, hours)}
                 />
               ))}
             </section>

@@ -11,24 +11,18 @@ const COIN_NAMES = {
 // are GH/s-scale, and BTC is TH/s-scale. The game no longer sells "25 GH/s of
 // everything" — credits are denominated in the room's real unit.
 const POOL_UNITS = { ZCASH: 'KH/s', KASPA: 'GH/s', LTC_DOGE: 'GH/s', BTC: 'TH/s' };
-// Session slot = tier-2 hashrate in the pool's unit (one unit of the room).
-const SESSION_SLOT = { ZCASH: 10, KASPA: 25, LTC_DOGE: 5, BTC: 50 };
 
 const RENTAL_HOURS = 72;
 
 export default function MiningRoomCard({
-  title, pool, rig, pendingReward, upgradeCost, renewCost,
-  onUpgrade, onRenew, onClaim, onWithdraw, onReinvest,
-  discountPct, pendingDoge, realBacking, payoutStatus,
-  sessionPrices, spareGhs, onBuySession,
+  title, pool, rig, pendingReward, rentCost, renewCost,
+  onRent, onRenew, onClaim, onWithdraw, onReinvest,
+  discountPct, pendingDoge, payoutStatus,
 }) {
   const [animating, setAnimating] = useState(false);
-  const [now, setNow] = useState(Date.now());
-  const level = Number(rig?.level) || 1;
+  const [, setNow] = useState(Date.now());
   const hashrate = Number(rig?.virtual_hashrate) || 0;
-  const backing = realBacking && realBacking.real_hash != null ? realBacking : null;
   const rentalActive = rig?.rental_active === true;
-  const roomHasRealRig = backing?.active_rentals && backing.active_rentals.length > 0;
   const hoursLeft = rig?.rental_hours_left != null ? Number(rig.rental_hours_left) : 0;
 
   // Pool payout status: what the pool owes the wallet, the pool's minimum
@@ -43,16 +37,6 @@ export default function MiningRoomCard({
   const poolUnpaid = ps?.unpaid != null ? Number(ps.unpaid) : null;
   const threshold = ps?.threshold != null ? Number(ps.threshold) : null;
   const etaText = ps?.eta_hours != null ? fmtEta(ps.eta_hours) : null;
-
-  // Session picker: spare_ghs arrives ALREADY in GH/s (backend converts the
-  // pool's display unit — KH/s/GH/s/TH/s — to GH/s before subtracting credits).
-  // The per-coin session slot (tier-2 hashrate) is also converted to GH/s so
-  // the comparison works across units.
-  const spareGhsNorm = spareGhs == null ? null : Number(spareGhs);
-  const unitToGhs = POOL_UNITS[pool] === 'KH/s' ? 1e-3 : POOL_UNITS[pool] === 'TH/s' ? 1e3 : 1;
-  const slotGhs = (SESSION_SLOT[pool] || 25) * unitToGhs;
-  const spareInPoolUnit = spareGhsNorm == null ? null : spareGhsNorm / unitToGhs;
-  const canSell = spareGhsNorm != null && spareGhsNorm >= slotGhs;
 
   // Live countdown while the rental window is active.
   useEffect(() => {
@@ -81,32 +65,22 @@ export default function MiningRoomCard({
     <div className="mining-card">
       <div className="card-header">
         <h2>{title}</h2>
-        <span className={`status-pill ${rentalActive ? 'active' : hashrate > 0 ? 'active' : roomHasRealRig ? 'active' : 'idle'}`}>
-          {rentalActive ? 'RENTED' : hashrate > 0 ? 'Mining' : roomHasRealRig ? 'RIG RUNNING' : 'Not rented'}
+        <span className={`status-pill ${rentalActive || hashrate > 0 ? 'active' : 'idle'}`}>
+          {rentalActive ? 'RENTED' : hashrate > 0 ? 'Mining' : 'Not rented'}
         </span>
       </div>
       <div className="card-stats">
-        {backing && (
-          <div className="stat" title="Real rented hashrate actually mining for this room's platform wallet right now. All players' active rentals share its payouts pro-rata.">
-            <span className="stat-label">Room's real rig (live)</span>
-            <span className="stat-value accent">
-              {backing.active_rentals && backing.active_rentals.length > 0
-                ? `${Number(backing.real_hash).toFixed(1)} ${backing.real_unit}`
-                : 'no rig running'}
-            </span>
-          </div>
-        )}
         {ps && (
           <div
             className="stat"
             title={
               ps.watch_mode === 'balance-delta'
-                ? "On-chain balance received at this room's wallet. F2Pool hides its internal unpaid balance for ltc1 addresses, so this shows actual payments only — the pool pays the wallet at the threshold."
-                : "Balance owed to this room's wallet at the mining pool, the pool's minimum payout, and the estimated time until the pool pays at the observed accrual rate."
+                ? "Total settled balance received by this pool's platform wallet. This is the whole-pool amount, not a per-user figure."
+                : "Total balance owed to this pool's platform wallet, its payout minimum, and the estimated payout time. This is the whole-pool amount, not a per-user figure."
             }
           >
             <span className="stat-label">
-              {ps.watch_mode === 'balance-delta' ? (pool === 'LTC_DOGE' ? 'Paid to wallet (LTC + DOGE)' : 'Paid to wallet') : 'Pool payout'}
+              {ps.watch_mode === 'balance-delta' ? 'Whole pool · paid to wallet' : 'Whole pool · payout progress'}
             </span>
             <span className="stat-value accent">
               {poolUnpaid != null
@@ -117,13 +91,9 @@ export default function MiningRoomCard({
             </span>
           </div>
         )}
-        <div className="stat" title="The hashrate you rented for this window — your share of the room's real payouts is (your virtual / total virtual) × real pool earnings.">
-          <span className="stat-label">Your rented hashrate</span>
+        <div className="stat" title="The hashrate assigned to your active miner rental.">
+          <span className="stat-label">Your miner hashrate</span>
           <span className="stat-value">{Number(hashrate).toFixed(4)} {POOL_UNITS[pool] || 'GH/s'}</span>
-        </div>
-        <div className="stat">
-          <span className="stat-label">Tier</span>
-          <span className="stat-value">{level}</span>
         </div>
         {rentalActive ? (
           <div className="stat">
@@ -137,12 +107,12 @@ export default function MiningRoomCard({
           </div>
         )}
         <div className="stat">
-          <span className="stat-label">Pending Yield</span>
+          <span className="stat-label">Your pending payout</span>
           <span className="stat-value accent">{Number(pendingReward).toFixed(8)}</span>
         </div>
         {Number(pendingDoge) > 0 && (
           <div className="stat">
-            <span className="stat-label">Pending DOGE</span>
+            <span className="stat-label">Your pending DOGE</span>
             <span className="stat-value accent">{Number(pendingDoge).toFixed(8)}</span>
           </div>
         )}
@@ -153,38 +123,28 @@ export default function MiningRoomCard({
         </div>
       )}
       <div className="card-actions">
-        {rentalActive || (hashrate > 0 && renewCost) ? (
-          <>
-            <button
-              className={`btn-primary ${animating ? 'pulse' : ''}`}
-              onClick={() => pulse(() => onRenew(pool))}
-              disabled={!renewCost}
-              title={renewCost ? `Rent ${COIN_NAMES[pool] || pool} hashrate for another ${RENTAL_HOURS}h${discountPct > 0 ? ` — ${discountPct}% multi-coin discount applied` : ''}` : 'Rental not renewable'}
-            >
-              {renewCost != null ? `${rentalActive ? 'Renew' : 'Rent again'} ${RENTAL_HOURS}h — ${price(renewCost)}${discountLabel}` : 'Max Level'}
-            </button>
-            <button
-              className="btn-secondary"
-              onClick={() => pulse(() => onUpgrade(pool))}
-              disabled={!upgradeCost}
-              title={upgradeCost ? `Upgrade to a bigger hashrate for ${RENTAL_HOURS}h${discountPct > 0 ? ` — ${discountPct}% multi-coin discount applied` : ''}` : 'Max tier'}
-            >
-              {upgradeCost != null ? `Upgrade — ${price(upgradeCost)}${discountLabel}` : 'Max Tier'}
-            </button>
-          </>
+        {rentalActive || renewCost != null ? (
+          <button
+            className={`btn-primary ${animating ? 'pulse' : ''}`}
+            onClick={() => pulse(() => onRenew(pool))}
+            disabled={!renewCost}
+            title={renewCost ? `Rent ${COIN_NAMES[pool] || pool} hashrate for another ${RENTAL_HOURS}h${discountPct > 0 ? ` — ${discountPct}% multi-coin discount applied` : ''}` : 'Rental not renewable'}
+          >
+            {renewCost != null ? `${rentalActive ? 'Renew' : 'Rent again'} ${RENTAL_HOURS}h — ${price(renewCost)}${discountLabel}` : 'Unavailable'}
+          </button>
         ) : (
           <button
             className={`btn-primary ${animating ? 'pulse' : ''}`}
-            onClick={() => pulse(() => onUpgrade(pool))}
-            disabled={!upgradeCost}
-            title={upgradeCost ? `Rent ${COIN_NAMES[pool] || pool} hashrate for ${RENTAL_HOURS}h${discountPct > 0 ? ` — ${discountPct}% multi-coin discount applied` : ''}` : 'Max tier'}
+            onClick={() => pulse(() => onRent(pool))}
+            disabled={!rentCost}
+            title={rentCost ? `Rent ${COIN_NAMES[pool] || pool} hashrate for ${RENTAL_HOURS}h${discountPct > 0 ? ` — ${discountPct}% multi-coin discount applied` : ''}` : 'Rental unavailable'}
           >
-            {upgradeCost != null ? `Rent ${RENTAL_HOURS}h — ${price(upgradeCost)}${discountLabel}` : 'Max Tier'}
+            {rentCost != null ? `Rent ${RENTAL_HOURS}h — ${price(rentCost)}${discountLabel}` : 'Unavailable'}
           </button>
         )}
         <button
           className="btn-secondary"
-          disabled={pendingReward <= 0 || (!rentalActive && !upgradeCost && !renewCost)}
+          disabled={pendingReward <= 0 || (!rentalActive && !rentCost && !renewCost)}
           onClick={() => pulse(() => onReinvest(pool))}
           title="Put your mined tokens into the next rental window — no USDC deposit needed"
         >
@@ -202,45 +162,6 @@ export default function MiningRoomCard({
           Withdraw {COIN_NAMES[pool] || pool}
         </button>
       </div>
-      {sessionPrices && (
-        <div className="session-picker">
-          <div className="session-picker-head">
-            <span className="session-picker-title">⚡ Short sessions — {SESSION_SLOT[pool] || 25} {POOL_UNITS[pool] || 'GH/s'} slice</span>
-            {spareInPoolUnit != null && (
-              <span className={`session-spare ${canSell ? '' : 'session-spare-low'}`}>
-                Spare: {spareInPoolUnit >= 100 ? spareInPoolUnit.toFixed(0) : spareInPoolUnit.toFixed(1)} {POOL_UNITS[pool] || 'GH/s'}
-              </span>
-            )}
-          </div>
-          {canSell ? (
-            <div className="session-picker-buttons">
-              {Object.entries(sessionPrices)
-                .map(([hours, sessionPrice]) => ({ hours: Number(hours), price: sessionPrice }))
-                .sort((a, b) => a.hours - b.hours)
-                .map(({ hours, price: sessionPrice }) => (
-                  <button
-                    key={hours}
-                    className="btn-secondary btn-session"
-                    disabled={price == null}
-                    onClick={() => pulse(() => onBuySession(hours))}
-                    title={
-                      `${SESSION_SLOT[pool] || 25} ${POOL_UNITS[pool] || 'GH/s'} for ${hours}h — a slice of the room's REAL running hashrate. No new rental, so shorter sessions cost more per hour.${discountPct > 0 ? ` ${discountPct}% multi-coin discount applied` : ''}`
-                    }
-                  >
-                    {hours}h — {sessionPrice != null ? `$${sessionPrice.toFixed(2)}` : '—'}
-                  </button>
-                ))}
-            </div>
-          ) : (
-            <div className="session-picker-note session-picker-note-low">
-              No sellable spare capacity — the room needs {SESSION_SLOT[pool] || 25} {POOL_UNITS[pool] || 'GH/s'} of free real hashrate for a session.
-            </div>
-          )}
-          <div className="session-picker-note">
-            Drawn from the room's live rigs — the rig is already running, no new rental.
-          </div>
-        </div>
-      )}
     </div>
   );
 }
