@@ -64,6 +64,6 @@ correct ordering/limit.
   what the ledger says.
 - Do NOT touch: purchases, deposits, withdrawals, the game logic, the
   operator flow, auth, migrations 001–023.
-- Keep the full test suite green (161 tests) + `npm run build` +
+- Keep the full test suite green (currently 173 tests — 19 suites) + `npm run build` +
   `git diff --check`.
 - Do NOT commit, do NOT deploy.
