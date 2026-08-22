@@ -194,11 +194,20 @@ the rig's min_rental_length, rounded to the nearest advertised option.)
      unavailable rig disappears. Same pattern as MarketPanel.jsx
      (loadMarket({silent}) + interval + in-flight guard).
    - Table (reuse MarketPanel CSS classes where sensible): Rig, Hashrate,
-     USD/hr, **Net/day**, Break-even, Min hours, RPI, Region + a "Select"
-     button per row.
+     USD/hr, **Net/day**, **Mine vs Buy** (new column — cost_per_coin vs
+     spot_usd from arithmetic: "Mine $0.0605 · Buy $0.0296 · 2.0×", green
+     when mining beats buying, red otherwise; merged pools use
+     cost_per_dollar_mined "Spend $X / $1 mined"), Break-even, Min hours,
+     RPI, Region + a "Select" button per row. The backend already returns
+     these fields (operatorMarketService.calculateProfitability —
+     `cost_per_coin`, `mine_vs_buy`, `cost_per_dollar_mined` — deployed
+     2026-08-22).
    - Selected rig → window picker (options = advertised windows ≥ rig min:
      1/3/6/12/24/48/72) → `POST /api/connect/quote` → show arithmetic line:
-     "Rental $X.XX + 5% connection fee $Y.YY = $Z.ZZ".
+     "Rental $X.XX + 5% connection fee $Y.YY = $Z.ZZ" plus the mine-vs-buy
+     line: "Mining 1 KAS costs ~$0.061 · buying costs $0.030 — mining is
+     2.0× the buy price" (from arithmetic.cost_per_coin / spot_usd /
+     mine_vs_buy — the single most important decision line for users).
    - Payout address input with per-coin placeholder (kaspa:… / t1… / bc1…)
      and client-side regex from ADDRESS_RULES.
    - **Connect button** → `POST /api/connect/order` (request_id = a fresh
