@@ -187,6 +187,12 @@ the rig's min_rental_length, rounded to the nearest advertised option.)
 7. **`components/ConnectPanel.jsx`** (new):
    - Coin tabs KAS / ZEC / BTC → `GET /api/connect/market?algo=…` (kheavyhash
      / equihash / sha256). If 503 → show "Connect is coming soon" and stop.
+   - **AUTO-REFRESH (Kevin's requirement 2026-08-22 — he tried to rent a rig
+     that was already gone):** poll the market list every 60s (silent —
+     keep the table on screen, update data + "data as of" timestamp); manual
+     ↻ Refresh button; on order failure, refresh immediately so the
+     unavailable rig disappears. Same pattern as MarketPanel.jsx
+     (loadMarket({silent}) + interval + in-flight guard).
    - Table (reuse MarketPanel CSS classes where sensible): Rig, Hashrate,
      USD/hr, **Net/day**, Break-even, Min hours, RPI, Region + a "Select"
      button per row.

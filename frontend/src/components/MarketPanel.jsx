@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 const MAX_RENTAL_HOURS = 72;
@@ -66,6 +66,12 @@ export default function MarketPanel({ auth }) {
   const [expanded, setExpanded] = useState('');
   const [sortKey, setSortKey] = useState('net_day');
   const [sortDir, setSortDir] = useState('desc');
+  const [lastUpdated, setLastUpdated] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
+  const refreshInFlight = useRef(false);
+  const mountedRef = useRef(true);
+
+  useEffect(() => () => { mountedRef.current = false; }, []);
 
   const headers = useMemo(() => ({
     'Content-Type': 'application/json',
@@ -116,26 +122,48 @@ export default function MarketPanel({ auth }) {
     setOrders(body.orders || []);
   };
 
-  useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
+  // Load the available rig list. silent=true keeps the current table on the
+  // screen and only updates data (auto-refresh / manual refresh); non-silent
+  // (algo switch / first load) blanks the table with the loading state.
+  const loadMarket = useCallback(async ({ silent = false } = {}) => {
+    if (refreshInFlight.current) return;
+    refreshInFlight.current = true;
+    if (silent) {
+      setRefreshing(true);
+    } else {
       setLoading(true);
       setError('');
       setMessage('');
       setMarket(null);
-      try {
-        const response = await fetch(`${API_BASE}/api/operator/market?algo=${encodeURIComponent(algo)}`, { headers });
-        const body = await responseBody(response, 'Could not load the MRR market.');
-        if (!cancelled) setMarket(body);
-      } catch (err) {
-        if (!cancelled) setError(err?.message || 'Could not load the MRR market.');
-      } finally {
-        if (!cancelled) setLoading(false);
+    }
+    try {
+      const response = await fetch(`${API_BASE}/api/operator/market?algo=${encodeURIComponent(algo)}`, { headers });
+      const body = await responseBody(response, 'Could not load the MRR market.');
+      if (mountedRef.current) {
+        setMarket(body);
+        setLastUpdated(new Date().toLocaleTimeString());
       }
-    };
-    load();
-    return () => { cancelled = true; };
+    } catch (err) {
+      if (!silent && mountedRef.current) setError(err?.message || 'Could not load the MRR market.');
+    } finally {
+      refreshInFlight.current = false;
+      if (mountedRef.current) {
+        setRefreshing(false);
+        setLoading(false);
+      }
+    }
   }, [algo, headers]);
+
+  // Initial load + reload when algo or the auth token changes.
+  useEffect(() => { loadMarket(); }, [loadMarket]);
+
+  // AUTO-REFRESH: the MRR inventory is a live market — rigs get rented by
+  // other miners constantly. Refresh silently every 60s so the list never
+  // shows rigs that are no longer available.
+  useEffect(() => {
+    const timer = window.setInterval(() => loadMarket({ silent: true }), 60000);
+    return () => window.clearInterval(timer);
+  }, [loadMarket]);
 
   useEffect(() => {
     let cancelled = false;
@@ -191,6 +219,9 @@ export default function MarketPanel({ auth }) {
       await fetchOrders();
     } catch (err) {
       setError(err?.message || 'Could not place the MRR order.');
+      // The rig may have been rented by someone else — refresh the list now
+      // so the unavailable row disappears immediately.
+      loadMarket({ silent: true });
     } finally {
       setOrderingRig('');
     }
@@ -219,6 +250,20 @@ export default function MarketPanel({ auth }) {
             {item.label}
           </button>
         ))}
+      </div>
+
+      <div className="market-refresh">
+        <span className="market-refresh__note">
+          {refreshing ? 'Refreshing…' : `Auto-refresh every 60s · data as of ${lastUpdated || '—'}`}
+        </span>
+        <button
+          type="button"
+          className="market-refresh__btn"
+          onClick={() => loadMarket({ silent: true })}
+          disabled={refreshing}
+        >
+          ↻ Refresh
+        </button>
       </div>
 
       {loading && <div className="market-panel__notice">Loading live MRR prices and coin markets…</div>}
