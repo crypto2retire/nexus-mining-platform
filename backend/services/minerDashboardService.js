@@ -219,6 +219,9 @@ async function buildOperatorMiners(userId) {
     }
 
     // Estimated payout for the remaining window (anchor production math).
+    // Rental hashrate is stored in the pool's display unit (KH/s for ZEC,
+    // TH/s for BTC, GH/s for KAS/LTC) — normalize to GH/s before scaling
+    // against the anchor (which is always expressed in GH/s).
     let anchor = null;
     if (algo) {
       try {
@@ -228,12 +231,13 @@ async function buildOperatorMiners(userId) {
         anchor = null;
       }
     }
+    const hashToGhs = { 'KH/s': 1e-6, 'TH/s': 1e3, 'kH/s': 1e-9, 'GH/s': 1 };
     for (const r of rentals) {
       r.est_payout1 = null;
       r.est_payout2 = null;
       r.est_payout_usd = null;
       if (!anchor || r.hashrate <= 0 || r.status !== 'ACTIVE') continue;
-      const scale = r.hashrate / anchor.anchorGhs;
+      const scale = (r.hashrate * (hashToGhs[unit] || 1)) / anchor.anchorGhs;
       const hours = r.hours_left;
       for (const [symbol, coinCfg] of Object.entries(anchor.productionDay)) {
         const amount = scale * coinCfg.production * (hours / 24);

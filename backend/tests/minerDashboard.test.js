@@ -161,8 +161,9 @@ describe('buildOperatorMiners', () => {
     const result = await buildOperatorMiners('op-user');
     const zec = result.pools.ZCASH;
     const a = zec.miners.find((m) => m.mrr_rental_id === '1001');
-    // A has 14h left; scale 445 KH/s / 30.55e-6 GH/s × 0.002060 ZEC/day × 14/24
-    const scale = 445 / 30.55e-6;
+    // A has 14h left; scale 445 KH/s → 445e-6 GH/s ÷ 30.55e-6 GH/s anchor
+    // × 0.002060 ZEC/day × 14/24
+    const scale = (445 * 1e-6) / 30.55e-6;
     const expected = scale * 0.002060 * (14 / 24);
     expect(a.hours_left).toBeCloseTo(14, 1);
     expect(a.est_payout_coin_1).toBeCloseTo(expected, 1);
