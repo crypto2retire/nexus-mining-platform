@@ -310,6 +310,23 @@ async function getOrderStatus(orderId) {
   return data;
 }
 
+/** Point an existing rental at a wallet-specific pool login. */
+async function switchRentalPool(rentalId, { host, port, user, pass } = {}) {
+  const id = String(rentalId || '').trim();
+  const connection = { host, port, user, pass };
+  if (!id || Object.values(connection).some((value) => !String(value || '').trim())) {
+    throw new Error('Complete rental and pool connection values are required');
+  }
+  return makeMrrRequest(
+    'PUT',
+    `/rental/${encodeURIComponent(id)}/pool`,
+    null,
+    Object.fromEntries(
+      Object.entries(connection).map(([key, value]) => [key, String(value)])
+    )
+  );
+}
+
 /**
  * Places a MiningRigRentals rental order for the given target pool.
  *
@@ -348,6 +365,7 @@ async function placeHashpowerOrder(targetPool, spendBtcAmount, exactRig = null) 
     };
   }
 
+  let rentalRequestSent = false;
   try {
     // The MRR account must hold a pool profile (pointing at the Nexus pool)
     // for each algorithm before live orders can be placed. Operator outbox
@@ -403,6 +421,14 @@ async function placeHashpowerOrder(targetPool, spendBtcAmount, exactRig = null) 
         cost: to8(length * hourly),
         hashrate: rig.hashrate || null,
       };
+      const maxCostBtc = Number(exactRig.maxCostBtc);
+      if (Number.isFinite(maxCostBtc) && maxCostBtc > 0 && fit.cost > maxCostBtc) {
+        return {
+          success: false,
+          mode: 'live',
+          error: `Requested rig now costs more than the authorized quote (${to8(maxCostBtc)} BTC)`,
+        };
+      }
     } else {
       // Financial integrity for player orders: never spend MORE than the user
       // paid merely to satisfy a rig minimum.
@@ -418,6 +444,7 @@ async function placeHashpowerOrder(targetPool, spendBtcAmount, exactRig = null) 
       };
     }
 
+    rentalRequestSent = true;
     const result = await makeMrrRequest(
       'PUT',
       '/rental',
@@ -469,6 +496,7 @@ async function placeHashpowerOrder(targetPool, spendBtcAmount, exactRig = null) 
     return {
       success: false,
       mode: 'live',
+      ambiguous: rentalRequestSent && !err.response,
       error: err.response?.data?.data?.message || err.response?.data?.message || err.message,
     };
   }
@@ -477,6 +505,7 @@ async function placeHashpowerOrder(targetPool, spendBtcAmount, exactRig = null) 
 module.exports = {
   placeHashpowerOrder,
   getOrderStatus,
+  switchRentalPool,
   getAlgorithms,
   getPoolProfiles,
   findAffordableRig,

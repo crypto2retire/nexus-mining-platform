@@ -6,6 +6,7 @@ const axios = require('axios');
 const {
   buildMrrSignature,
   placeHashpowerOrder,
+  switchRentalPool,
   findAffordableRig,
   makeMrrRequest,
   isLiveMode,
@@ -368,6 +369,98 @@ describe('placeHashpowerOrder (MRR)', () => {
     expect(result.error).toMatch(/MRR_POOL_PROFILE_EQUIHASH/);
     expect(axios).not.toHaveBeenCalled();
   });
+});
+
+describe('switchRentalPool (MRR)', () => {
+  test('uses the verified PUT rental pool-switch contract', async () => {
+    setEnv({ NODE_ENV: 'production', LIVE_ORDERS: '1' });
+    axios.mockResolvedValue({
+      data: { success: true, data: { id: '5701967', success: true } },
+    });
+
+    await switchRentalPool('5701967', {
+      host: 'de.kaspa.herominers.com',
+      port: '1207',
+      user: 'kaspa:test-address',
+      pass: 'x',
+    });
+
+    expect(axios).toHaveBeenCalledWith(expect.objectContaining({
+      method: 'PUT',
+      url: 'https://www.miningrigrentals.com/api/v2/rental/5701967/pool',
+      data: JSON.stringify({
+        host: 'de.kaspa.herominers.com',
+        port: '1207',
+        user: 'kaspa:test-address',
+        pass: 'x',
+      }),
+    }));
+  });
+
+  test('rejects incomplete switch values before making a request', async () => {
+    await expect(switchRentalPool('5701967', {
+      host: 'de.kaspa.herominers.com', port: '', user: 'kaspa:test-address', pass: 'x',
+    })).rejects.toThrow(/complete rental and pool connection values/i);
+    expect(axios).not.toHaveBeenCalled();
+  });
+});
+
+test('exact-rig placement rejects a refreshed cost above the authorized quote', async () => {
+  setEnv({ NODE_ENV: 'production', LIVE_ORDERS: '1' });
+  axios.mockResolvedValueOnce({
+    data: {
+      data: {
+        records: [{
+          id: 'rig-price-moved',
+          name: 'KAS rig',
+          rpi: '98',
+          online: true,
+          status: { status: 'available', rented: false, online: true },
+          maxhours: '72',
+          price: { BTC: { hour: '0.000002', min_rental_length: 3, enabled: true } },
+          hashrate: { advertised: { hash: 0.2, type: 'th', nice: '200 GH/s' } },
+        }],
+      },
+    },
+  });
+
+  const result = await placeHashpowerOrder('KASPA', 0.000024, {
+    rigId: 'rig-price-moved',
+    lengthHours: 24,
+    profileId: '957805',
+    maxCostBtc: 0.000024,
+  });
+
+  expect(result.success).toBe(false);
+  expect(result.error).toMatch(/authorized quote/i);
+  expect(axios).toHaveBeenCalledTimes(1);
+});
+
+test('exact-rig placement marks a no-response rental failure as ambiguous', async () => {
+  setEnv({ NODE_ENV: 'production', LIVE_ORDERS: '1' });
+  axios
+    .mockResolvedValueOnce({
+      data: {
+        data: {
+          records: [{
+            id: 'rig-timeout', name: 'KAS rig', rpi: '98', online: true,
+            status: { status: 'available', rented: false, online: true },
+            maxhours: '72',
+            price: { BTC: { hour: '0.000001', min_rental_length: 3, enabled: true } },
+            hashrate: { advertised: { hash: 0.2, type: 'th', nice: '200 GH/s' } },
+          }],
+        },
+      },
+    })
+    .mockRejectedValueOnce(new Error('socket timed out'));
+
+  const result = await placeHashpowerOrder('KASPA', 0.000024, {
+    rigId: 'rig-timeout', lengthHours: 24, profileId: '957805', maxCostBtc: 0.000024,
+  });
+
+  expect(result.success).toBe(false);
+  expect(result.ambiguous).toBe(true);
+  expect(result.error).toMatch(/socket timed out/);
 });
 
 describe('findAffordableRig', () => {

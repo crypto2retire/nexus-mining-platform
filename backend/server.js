@@ -8,6 +8,7 @@ const { startPayoutTrigger } = require('./services/payoutTrigger');
 const { startRentalScheduler } = require('./services/rentalScheduler');
 const { startAccrualDistributor } = require('./services/accrualDistributor');
 const { startOrderOutboxWorker } = require('./services/orderOutboxWorker');
+const { startConnectWorker } = require('./services/connectWorker');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -44,4 +45,5 @@ app.listen(PORT, () => {
   startRentalScheduler();
   startAccrualDistributor();
   startOrderOutboxWorker();
+  startConnectWorker();
 });

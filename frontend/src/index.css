@@ -1366,3 +1366,299 @@ button:disabled {
   font-size: 0.8rem;
   margin: 0;
 }
+
+/* ============ Direct-to-wallet Connect ============ */
+.app-nav {
+  display: flex;
+  gap: 0.5rem;
+  margin: 0 0 1rem;
+  padding: 0.35rem;
+  width: fit-content;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  background: var(--surface);
+}
+
+.app-nav button,
+.connect-tabs button,
+.connect-refresh button,
+.connect-table button,
+.connect-notice button,
+.connect-submit {
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--surface-2);
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+}
+
+.app-nav button {
+  padding: 0.55rem 0.9rem;
+}
+
+.app-nav button.active,
+.connect-tabs button.active {
+  border-color: var(--accent);
+  background: rgba(34, 211, 238, 0.12);
+  color: var(--accent);
+}
+
+.connect-panel {
+  padding: 1.25rem;
+  border: 1px solid var(--border);
+  border-radius: 0.9rem;
+  background: var(--surface);
+}
+
+.connect-header,
+.connect-refresh,
+.connect-order-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.connect-header h2,
+.connect-orders h3,
+.connect-checkout h3 {
+  margin: 0;
+}
+
+.connect-header p {
+  margin: 0.35rem 0 0;
+  color: var(--muted);
+}
+
+.connect-direct,
+.connect-status {
+  padding: 0.3rem 0.6rem;
+  border: 1px solid rgba(52, 211, 153, 0.4);
+  border-radius: 999px;
+  background: rgba(52, 211, 153, 0.1);
+  color: var(--success);
+  font-size: 0.75rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.connect-tabs {
+  display: flex;
+  gap: 0.5rem;
+  margin: 1.1rem 0 0.75rem;
+}
+
+.connect-tabs button,
+.connect-refresh button,
+.connect-table button,
+.connect-notice button {
+  padding: 0.5rem 0.75rem;
+}
+
+.connect-refresh {
+  margin-bottom: 0.75rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.connect-refresh button:hover,
+.connect-table button:hover,
+.connect-notice button:hover,
+.connect-submit:hover,
+.app-nav button:hover,
+.app-nav button:focus-visible,
+.connect-tabs button:focus-visible,
+.connect-refresh button:focus-visible,
+.connect-table button:focus-visible,
+.connect-notice button:focus-visible,
+.connect-submit:focus-visible {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.connect-notice,
+.connect-error,
+.connect-message {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0.75rem 0;
+  padding: 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 0.65rem;
+  color: var(--muted);
+}
+
+.connect-error {
+  border-color: rgba(248, 113, 113, 0.45);
+  background: rgba(248, 113, 113, 0.08);
+  color: var(--danger);
+}
+
+.connect-message {
+  border-color: rgba(52, 211, 153, 0.45);
+  background: rgba(52, 211, 153, 0.08);
+  color: var(--success);
+}
+
+.connect-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 0.65rem;
+}
+
+.connect-table {
+  width: 100%;
+  min-width: 960px;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+}
+
+.connect-table th,
+.connect-table td {
+  padding: 0.65rem;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.connect-table th {
+  color: var(--muted);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.connect-table tr.selected {
+  background: rgba(34, 211, 238, 0.07);
+}
+
+.connect-positive,
+.connect-paid {
+  color: var(--success);
+}
+
+.connect-negative,
+.connect-field-error {
+  color: var(--danger);
+}
+
+.connect-table button:disabled,
+.connect-refresh button:disabled,
+.connect-submit:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.connect-checkout,
+.connect-orders {
+  margin-top: 1.15rem;
+  padding-top: 1.15rem;
+  border-top: 1px solid var(--border);
+}
+
+.connect-form-grid {
+  display: grid;
+  grid-template-columns: minmax(10rem, 0.5fr) minmax(18rem, 1.5fr);
+  gap: 0.85rem;
+  margin-top: 0.85rem;
+}
+
+.connect-form-grid label {
+  display: grid;
+  gap: 0.4rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.connect-form-grid input,
+.connect-form-grid select {
+  width: 100%;
+  padding: 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+
+.connect-form-grid input[aria-invalid='true'] {
+  border-color: var(--danger);
+}
+
+.connect-quote {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0.85rem 0;
+  padding: 0.9rem;
+  border: 1px solid rgba(34, 211, 238, 0.35);
+  border-radius: 0.65rem;
+  background: rgba(34, 211, 238, 0.06);
+}
+
+.connect-quote span,
+.connect-muted,
+.connect-orders li > span {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.connect-submit {
+  padding: 0.7rem 1rem;
+  border-color: var(--accent);
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  color: #071018;
+  font-weight: 800;
+}
+
+.connect-orders ul {
+  display: grid;
+  gap: 0.65rem;
+  margin: 0.75rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.connect-orders li {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+  background: var(--surface-2);
+}
+
+.connect-orders a {
+  color: var(--accent);
+  font-size: 0.8rem;
+}
+
+.connect-status--refunded,
+.connect-status--failed,
+.connect-status--failed_review {
+  border-color: rgba(248, 113, 113, 0.45);
+  background: rgba(248, 113, 113, 0.08);
+  color: var(--danger);
+}
+
+@media (max-width: 768px) {
+  .connect-header,
+  .connect-refresh {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .connect-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .app-nav,
+  .connect-tabs {
+    width: 100%;
+  }
+
+  .app-nav button,
+  .connect-tabs button {
+    flex: 1;
+  }
+}

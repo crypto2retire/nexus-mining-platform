@@ -8,6 +8,12 @@ const { getState, claimStreak, createReferralLink, applyReferralCode } = require
 const { getMarket, createOrder, listOrders } = require('../controllers/operatorController');
 const { createChallenge, verifySignature } = require('../services/authService');
 const { requireAuth } = require('../middleware/auth');
+const {
+  createConnectOrder,
+  getConnectMarket,
+  getConnectQuote,
+  listConnectOrders,
+} = require('../controllers/connectController');
 const { requireAdminKey } = require('../middleware/adminAuth');
 
 const router = express.Router();
@@ -35,6 +41,10 @@ router.get('/game/state', requireAuth, getState);
 router.post('/game/streak/claim', requireAuth, claimStreak);
 router.post('/game/referral/create', requireAuth, createReferralLink);
 router.post('/game/referral/apply', requireAuth, applyReferralCode);
+router.get('/connect/market', requireAuth, getConnectMarket);
+router.post('/connect/quote', requireAuth, getConnectQuote);
+router.post('/connect/order', requireAuth, createConnectOrder);
+router.get('/connect/orders', requireAuth, listConnectOrders);
 router.get('/operator/market', requireAuth, getMarket);
 router.post('/operator/order', requireAuth, createOrder);
 router.get('/operator/orders', requireAuth, listOrders);
