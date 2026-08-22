@@ -27,6 +27,17 @@ const WALLET_IDENTITIES = [
   { matches: (provider) => provider.isMetaMask, id: 'metamask', name: 'MetaMask', icon: 'M' },
 ];
 
+// Stable ids for EIP-6963-announced wallets (rdns) so the remembered wallet
+// provider matches whether the wallet injected window.ethereum, exposed
+// window.<brand>.ethereum, or announced via eip6963.
+const EIP6963_RDNS_IDS = {
+  'com.trustwallet.app': 'trust',
+  'com.phantom': 'phantom',
+  'com.coinbase.wallet': 'coinbase',
+  'io.metamask': 'metamask',
+  'io.rabby': 'rabby',
+};
+
 function identityFor(provider) {
   return WALLET_IDENTITIES.find(({ matches }) => matches(provider)) || {
     id: 'eip1193',
@@ -73,7 +84,11 @@ export function getAvailableWallets() {
       if (info?.name) {
         const name = String(info.name).trim();
         const icon = name ? name.charAt(0).toUpperCase() : 'W';
-        identity = { id: `eip6963-${info.rdns || name.toLowerCase()}`, name, icon };
+        identity = {
+          id: EIP6963_RDNS_IDS[info.rdns] || `eip6963-${info.rdns || name.toLowerCase()}`,
+          name,
+          icon,
+        };
       }
     }
     const count = (counts.get(identity.id) || 0) + 1;
