@@ -111,7 +111,7 @@ test('merged LTC+DOGE reports per-coin mine cost and the universal spend ratio',
   expect(result.arithmetic.cost_per_dollar_mined).toBeCloseTo(3.84 / minedValue, 4);
 });
 
-test('market ranking filters junk, prefers verified available rigs, and sorts table by net day', () => {
+test('market ranking filters junk, surfaces the true best available rig (even unrated) with a caveat, and sorts table by net day', () => {
   const newRig = {
     ...KAS_RIG,
     id: 'new-cheap',
@@ -135,8 +135,12 @@ test('market ranking filters junk, prefers verified available rigs, and sorts ta
   });
 
   expect(result.rigs.map((rig) => rig.rig_id)).toEqual(['new-cheap', 'verified']);
-  expect(result.best_value.rig_id).toBe('verified');
+  // The cheaper unrated rig nets higher (−1.08 vs −2.28) and IS the best
+  // value — the banner must show it, flagged as unrated, not hide it
+  // (Kevin 2026-08-22).
+  expect(result.best_value.rig_id).toBe('new-cheap');
   expect(result.best_value.reason).toMatch(/net at current KAS price/);
+  expect(result.best_value.reason).toMatch(/unrated/);
   expect(result.rigs[0].usd_per_ghs_day).toBeLessThan(result.rigs[1].usd_per_ghs_day);
 });
 

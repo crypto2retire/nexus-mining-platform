@@ -202,7 +202,11 @@ function bestReason(rig, config, spots) {
   const breakEvenText = breakEven === null
     ? 'break-even unavailable'
     : `break-even $${breakEven.toFixed(4)}${delta === null ? '' : ` — ${delta.toFixed(1)}% ${direction} spot`}`;
-  return `≈ ${netText} net at current ${config.primaryCoin} price (${breakEvenText})`;
+  const rpi = String(rig.rpi ?? '').trim();
+  const rpiNote = /^new$/i.test(rpi) || !(Number(rpi) >= 90)
+    ? ' — unrated/low-track-record rig on MRR (no track record yet)'
+    : '';
+  return `≈ ${netText} net at current ${config.primaryCoin} price (${breakEvenText})${rpiNote}`;
 }
 
 function buildMarketView({ records, algo, btcUsd, spots, profileId }) {
@@ -246,10 +250,12 @@ function buildMarketView({ records, algo, btcUsd, spots, profileId }) {
     a.rig_id.localeCompare(b.rig_id)
   );
   const available = rigs.filter((rig) => rig.available);
-  const verified = available.filter((rig) => Number(rig.rpi) >= 90);
-  const nonNew = available.filter((rig) => !/^new$/i.test(String(rig.rpi || '').trim()));
-  const candidates = verified.length ? verified : nonNew.length ? nonNew : available;
-  const best = candidates[0] || null;
+  // Best value = the true best available rig (top of the sorted table, which is
+  // ordered by net_day desc then usd_per_ghs_day asc). We do NOT re-rank by
+  // rpi here — an unrated rig that nets higher is still the best value; the
+  // reason string flags its lack of a track record instead of hiding it
+  // (Kevin 2026-08-22: the banner must match the real best available).
+  const best = available[0] || null;
   return {
     rigs: rigs.slice(0, 25),
     best_value: best ? {
