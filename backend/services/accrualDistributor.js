@@ -11,14 +11,12 @@ const { distributeAccrued } = require('./rewardDistributor');
  * reimburses the treasury (payoutTrigger records it as settlement only when
  * ACCRUAL_DISTRIBUTION_ENABLED=1).
  *
- * Only unpaid-visible rooms accrue (ZCASH/KASPA/XMR). LTC_DOGE's unpaid is
- * hidden (F2Pool 404s on ltc1 addresses), so its earnedTotal basis would
- * double-count the on-chain balance — it stays settlement-gated (~1 day
- * horizon, fine).
+ * Only unpaid-visible rooms accrue (ZCASH/KASPA). LTC_DOGE and BTC use
+ * on-chain balance-delta watches, so both stay settlement-gated.
  */
 
 const INTERVAL_MS = Number(process.env.ACCRUAL_DISTRIBUTION_INTERVAL_HOURS || 6) * 3600 * 1000;
-const ACCRUAL_POOLS = ['ZCASH', 'KASPA', 'XMR'];
+const ACCRUAL_POOLS = ['ZCASH', 'KASPA'];
 
 let timer = null;
 let running = false;

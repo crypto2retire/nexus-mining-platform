@@ -7,14 +7,14 @@ jest.mock('../services/priceOracle', () => ({
 jest.mock('../services/hashrateRenter', () => ({
   placeHashpowerOrder: jest.fn(),
   getOrderStatus: jest.fn(),
-  POOL_ALGORITHM_MAP: { ZCASH: 'EQUIHASH', KASPA: 'KHEAVYHASH', LTC_DOGE: 'SCRYPT', XMR: 'RANDOMX' },
+  POOL_ALGORITHM_MAP: { ZCASH: 'EQUIHASH', KASPA: 'KHEAVYHASH', LTC_DOGE: 'SCRYPT', BTC: 'SHA256' },
   PROVIDER_NAME: 'NICEHASH',
   LIVE_ORDERS_ENV: 'NICEHASH_LIVE_ORDERS',
 }));
 jest.mock('../services/mrrRenter', () => ({
   placeHashpowerOrder: jest.fn(),
   getOrderStatus: jest.fn(),
-  POOL_ALGORITHM_MAP: { ZCASH: 'EQUIHASH', KASPA: 'KHEAVYHASH', LTC_DOGE: 'SCRYPT', XMR: 'RANDOMX' },
+  POOL_ALGORITHM_MAP: { ZCASH: 'EQUIHASH', KASPA: 'KHEAVYHASH', LTC_DOGE: 'SCRYPT', BTC: 'SHA256' },
   PROVIDER_NAME: 'MRR',
   LIVE_ORDERS_ENV: 'MRR_LIVE_ORDERS',
 }));
@@ -330,13 +330,12 @@ describe('upgradeRig — currency conversion + order loop', () => {
     expect(res2.body.btc_spent).toBe(0.000475);
     expect(placeHashpowerOrder).not.toHaveBeenCalled();
 
-    // XMR tier 2 = $5 (rental-backed room, re-added 2026-08-20 — cheap to
-    // back like KASPA). Fee 5% = 0.25. Net 4.75 / 100000 = 0.0000475 BTC.
+    // BTC tier 2 = $100 for 50 TH/s. Fee 5% = $5. Net $95 / $100,000.
     const res3 = makeRes();
-    await upgradeRig(req({ target_pool: 'XMR', request_id: 'req-xmr-1' }), res3);
+    await upgradeRig(req({ target_pool: 'BTC', request_id: 'req-btc-1' }), res3);
     expect(res3.body.success).toBe(true);
-    expect(res3.body.protocol_fee_usdc).toBe(0.25);
-    expect(res3.body.btc_spent).toBe(0.0000475);
+    expect(res3.body.protocol_fee_usdc).toBe(5);
+    expect(res3.body.btc_spent).toBe(0.00095);
     expect(placeHashpowerOrder).not.toHaveBeenCalled();
   });
 

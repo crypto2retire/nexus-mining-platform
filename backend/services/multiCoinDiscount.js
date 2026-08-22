@@ -27,11 +27,10 @@ const DISCOUNT_LADDER = {
  */
 async function coinsOwnedFor(queryable, userId) {
   const { rows } = await queryable.query(
-    // All four purchasable marketplace rooms count (XMR re-added 2026-08-20
-    // as a rental-backed room).
+    // All four purchasable marketplace rooms count.
     `SELECT COUNT(*) AS c FROM virtual_rigs
       WHERE user_id = $1
-        AND target_pool IN ('ZCASH', 'KASPA', 'LTC_DOGE', 'XMR')
+        AND target_pool IN ('ZCASH', 'KASPA', 'LTC_DOGE', 'BTC')
         AND rental_expires_at > CURRENT_TIMESTAMP`,
     [userId]
   );

@@ -6,24 +6,18 @@ const { distributePayout, distributeMergedReward, recordPoolPayment } = require(
  * Payout trigger — watches the platform mining wallets at their pools and
  * automatically distributes newly-landed coins to players via distributePayout.
  *
- * Detection modes (pool endpoints verified reachable 2026-08-21):
+ * Detection modes (pool endpoints verified reachable through 2026-08-22):
  *   unpaid-drop   : ZEC at 2Miners and KAS at HeroMiners — each accounts API `stats.balance`
  *                   field is the wallet's unpaid balance. An increase = a
  *                   balance accrual; a qualifying drop means the pool paid.
- *   unpaid-drop   : XMR at herominers — the API exposes UNPAID balance only.
- *                   When unpaid crosses the pool minimum (0.1 XMR) and then
- *                   drops, the pool paid out; the drop is the payout amount.
- *                   (XMR re-added 2026-08-20 as a rental-backed room; the
- *                   platform XMR wallet has been earning at herominers.)
- *
- * LTC_DOGE uses Blockcypher (F2Pool accepts bech32 workers — stratum-verified
- * — but its stats page can't look up ltc1... addresses).
+ *   balance-delta : LTC_DOGE and BTC use Blockcypher on-chain wallet balances.
+ *                   An increase is a settled pool payment; a decrease resets
+ *                   the baseline after the operator moves coins.
  *
  * State persists in payout_watch so restarts never double-distribute.
  */
 
 const INTERVAL_MS = Number(process.env.PAYOUT_CHECK_INTERVAL_MS || 600000); // 10 min
-const XMR_MIN_PAYOUT = Number(process.env.XMR_MIN_PAYOUT || 0.1);
 const EPS = 1e-8;
 
 // Pool minimum payout thresholds (COIN units) — the amount at which each pool
@@ -31,14 +25,14 @@ const EPS = 1e-8;
 //   KASPA 1 KAS     (HeroMiners live pool config)
 //   ZCASH 0.1 ZEC   (2Miners live config: allowedMinPayout=minPayout=1e7
 //                    zatoshi = 0.1 ZEC; previously hardcoded 0.01 — wrong)
-//   XMR   0.1 XMR   (herominers, XMR_MIN_PAYOUT env)
+//   BTC   0.00065536 BTC (Ocean automatic payout threshold)
 //   LTC   0.02 LTC  (F2Pool help center payout-thresholds article)
 //   DOGE  (merged bonus — F2Pool does not publish a DOGE threshold; the
 //          on-chain arrival watch shows the total, no ETA)
 const PAYOUT_MIN = {
   ZCASH: Number(process.env.ZCASH_MIN_PAYOUT || 0.1),
   KASPA: Number(process.env.KASPA_MIN_PAYOUT || 1),
-  XMR: Number(process.env.XMR_MIN_PAYOUT || 0.1),
+  BTC: Number(process.env.BTC_MIN_PAYOUT || 0.00065536),
   LTC_DOGE: Number(process.env.LTC_MIN_PAYOUT || 0.02),
   LTC_DOGE_DOGE: null,
 };
@@ -47,7 +41,7 @@ const WATCHES = {
   ZCASH: {
     // 2Miners stats.balance = UNPAID balance in ATOMS (1 ZEC = 1e8). It
     // ACCRUES while mining and DROPS when the pool pays the wallet — so the
-    // watch is unpaid-drop (like XMR), NOT balance-delta. Fixed 2026-08-20:
+    // watch is unpaid-drop, NOT balance-delta. Fixed 2026-08-20:
     // balanceOf used to return raw atoms and balance-delta treated every
     // accrual as a payout (numeric overflow in the ledger).
     mode: 'unpaid-drop',
@@ -68,16 +62,18 @@ const WATCHES = {
     balanceOf: (d) => Number(d?.stats?.balance ?? d?.balance ?? 0) / 1e8,
     netHashOf: () => null,
   },
-  XMR: {
-    mode: 'unpaid-drop',
-    minPayout: PAYOUT_MIN.XMR,
-    walletEnv: 'XMR_WALLET_ADDRESS',
-    accountUrl: (addr) => `https://monero.herominers.com/api/stats_address?address=${addr}`,
+  BTC: {
+    // Ocean pays the mining address directly. Blockcypher exposes the
+    // resulting on-chain wallet balance in satoshis (1 BTC = 1e8 satoshis).
+    mode: 'balance-delta',
+    minPayout: PAYOUT_MIN.BTC,
+    walletEnv: 'MRR_PLATFORM_WALLET_BTC',
+    accountUrl: (addr) => `https://api.blockcypher.com/v1/btc/main/addrs/${addr}`,
     statsUrl: null,
-    balanceOf: (d) => {
-      return Number(d?.stats?.balance || 0) / 1e12;
-    },
+    balanceOf: (d) => Number(d.balance) / 1e8,
     netHashOf: () => null,
+    gamePool: 'BTC',
+    settlementGated: true,
   },
   LTC_DOGE: {
     // F2Pool accepts bech32 workers for MINING (stratum-authorize verified
@@ -92,6 +88,7 @@ const WATCHES = {
     statsUrl: null,
     balanceOf: (d) => Number(d.balance) / 1e8,
     netHashOf: () => null,
+    settlementGated: true, // on-chain watch: distribute on arrival, never accrual (2026-08-22 fix)
   },
   // The DOGE side of the LTC_DOGE pool: F2Pool merged mining pays DOGE to its
   // own bound address (011_doge_merged). Same on-chain balance-delta watch,
@@ -106,6 +103,7 @@ const WATCHES = {
     netHashOf: () => null,
     distribute: 'merged',
     gamePool: 'LTC_DOGE',
+    settlementGated: true, // on-chain watch: distribute on arrival, never accrual (2026-08-22 fix)
   },
 };
 
@@ -139,9 +137,9 @@ async function fetchNetworkHashrate(poolKey) {
  * Returns {action: 'payout', amount} | {action: 'reset'} | {action: 'none'}
  * (baseline is handled by the caller when last is null).
  *
- * balance-delta mode (ZEC/KAS): increase = payout (the delta), decrease =
+ * balance-delta mode (LTC/DOGE/BTC): increase = payout (the delta), decrease =
  * operator moved coins → reset baseline.
- * unpaid-drop mode (XMR): unpaid grows as earnings accrue — only a LARGE drop
+ * unpaid-drop mode (ZEC/KAS): unpaid grows as earnings accrue — only a LARGE drop
  * (after reaching the pool minimum) means the pool paid out; anything else is
  * accrual noise.
  */
@@ -225,7 +223,7 @@ async function checkPool(poolKey) {
       // with a network-hashrate fetch (or accept null and record it).
       console.warn(`${poolKey}: detected payout ${event.amount} but no network hashrate; recording with null`);
     }
-    if (process.env.ACCRUAL_DISTRIBUTION_ENABLED === '1') {
+    if (process.env.ACCRUAL_DISTRIBUTION_ENABLED === '1' && !cfg.settlementGated) {
       // ACCRUAL mode (016): the accrual distributor already credited users as
       // the room accrued — the pool settling now only records the basis row
       // (keeps earnedTotal continuous). Crediting again = double payment.
@@ -331,13 +329,12 @@ async function getPayoutStatus() {
   return {
     last_run: lastRun,
     interval_ms: INTERVAL_MS,
-    xmr_min_payout: XMR_MIN_PAYOUT,
     wallets: {
       ZCASH: process.env.MRR_PLATFORM_WALLET_ZEC ? 'set' : 'unset',
       KASPA: process.env.MRR_PLATFORM_WALLET_KAS ? 'set' : 'unset',
       LTC_DOGE: process.env.MRR_PLATFORM_WALLET_LTC ? 'set' : 'unset',
       LTC_DOGE_DOGE: process.env.MRR_PLATFORM_WALLET_DOGE ? 'set' : 'unset',
-      XMR: process.env.XMR_WALLET_ADDRESS ? 'set' : 'unset',
+      BTC: process.env.MRR_PLATFORM_WALLET_BTC ? 'set' : 'unset',
     },
     watches: rows,
   };

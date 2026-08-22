@@ -6,7 +6,7 @@ const ALGOS = [
   { id: 'kheavyhash', label: 'KAS' },
   { id: 'scrypt', label: 'LTC + DOGE' },
   { id: 'equihash', label: 'ZEC' },
-  { id: 'randomx', label: 'XMR' },
+  { id: 'sha256', label: 'BTC' },
 ];
 
 async function responseBody(response, fallback) {

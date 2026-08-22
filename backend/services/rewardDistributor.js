@@ -30,7 +30,7 @@ const POOL_COINGECKO = {
   ZCASH: 'zcash',
   KASPA: 'kaspa',
   LTC_DOGE: 'litecoin',
-  XMR: 'monero',
+  BTC: 'bitcoin',
   // Synthetic key: the DOGE side of the LTC_DOGE merged pool.
   LTC_DOGE_DOGE: 'dogecoin',
 };
@@ -39,8 +39,15 @@ const POOL_COIN_SYMBOL = {
   ZCASH: 'ZEC',
   KASPA: 'KAS',
   LTC_DOGE: 'LTC',
-  XMR: 'XMR',
+  BTC: 'BTC',
   LTC_DOGE_DOGE: 'DOGE',
+};
+
+const POOL_HASH_UNIT = {
+  ZCASH: 'KH/s',
+  KASPA: 'GH/s',
+  LTC_DOGE: 'GH/s',
+  BTC: 'TH/s',
 };
 
 async function fetchCoinUsdPrice(targetPool) {
@@ -186,9 +193,10 @@ async function distributePayout(targetPool, totalCryptoReward1, totalNetworkHash
   let realHashNow = null;
   try {
     let activeRentals = [];
-    if (targetPool === 'LTC_DOGE') {
+    if (targetPool === 'LTC_DOGE' || targetPool === 'BTC') {
       const r = await pool.query(
-        "SELECT mrr_rental_id FROM rig_rentals WHERE target_pool = 'LTC_DOGE' AND status = 'ACTIVE'"
+        "SELECT mrr_rental_id FROM rig_rentals WHERE target_pool = $1 AND status = 'ACTIVE'",
+        [targetPool]
       );
       activeRentals = r.rows;
     }
@@ -238,7 +246,7 @@ async function distributePayout(targetPool, totalCryptoReward1, totalNetworkHash
     // denominator ledger). A failed live fetch leaves the last known row.
     if (realHashNow != null) {
       try {
-        await logRealHashChange(client, targetPool, realHashNow);
+        await logRealHashChange(client, targetPool, realHashNow, POOL_HASH_UNIT[targetPool] || 'GH/s');
       } catch (logErr) {
         console.warn(`distribute: could not log real hash for ${targetPool}: ${logErr.message}`);
       }
@@ -523,7 +531,7 @@ async function handleRewardWebhook(req, res) {
   }
 
   const { target_pool, total_crypto_reward_1, total_network_hashrate } = req.body || {};
-  if (!['ZCASH', 'KASPA', 'LTC_DOGE', 'XMR'].includes(target_pool)) {
+  if (!['ZCASH', 'KASPA', 'LTC_DOGE', 'BTC'].includes(target_pool)) {
     return res.status(400).json({ error: 'Invalid target_pool' });
   }
   if (typeof total_crypto_reward_1 !== 'number' || total_crypto_reward_1 <= 0) {

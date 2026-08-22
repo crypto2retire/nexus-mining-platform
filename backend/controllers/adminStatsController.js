@@ -93,7 +93,7 @@ async function getAdminStats(_req, res) {
     // Mined = LIVE production from Real Backing (computed at read time from
     // the pool wallet + settled payments). Kevin 2026-08-20: reports must
     // use current data, never 6h-old snapshots.
-    for (const poolName of ['ZCASH', 'KASPA', 'LTC_DOGE', 'XMR']) {
+    for (const poolName of ['ZCASH', 'KASPA', 'LTC_DOGE', 'BTC']) {
       const mined = backing?.[poolName]?.mined_total;
       if (mined == null) continue;
       const distributedAmt = distributedByPool[poolName] ?? 0;

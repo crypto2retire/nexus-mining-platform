@@ -7,13 +7,13 @@ const POOL_LABELS = {
   ZCASH: 'ZEC',
   KASPA: 'KAS',
   LTC_DOGE: 'LTC/DOGE',
-  XMR: 'XMR',
+  BTC: 'BTC',
 };
 
-const POOL_KEYS = ['ZCASH', 'KASPA', 'LTC_DOGE', 'XMR'];
+const POOL_KEYS = ['ZCASH', 'KASPA', 'LTC_DOGE', 'BTC'];
 
 // Per-coin hashrate unit (2026-08-20): credits are in each room's REAL unit.
-const POOL_UNITS = { ZCASH: 'KH/s', KASPA: 'GH/s', LTC_DOGE: 'GH/s', XMR: 'KH/s' };
+const POOL_UNITS = { ZCASH: 'KH/s', KASPA: 'GH/s', LTC_DOGE: 'GH/s', BTC: 'TH/s' };
 
 /**
  * Operator-only panel. The administrator enters a credential that is separate

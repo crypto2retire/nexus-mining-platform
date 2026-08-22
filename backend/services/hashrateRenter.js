@@ -33,8 +33,7 @@ const POOL_ALGORITHM_MAP = {
   ZCASH: 'ZHASH',
   KASPA: 'KHEAVYHASH',
   LTC_DOGE: 'SCRYPT',
-  // XMR is a rental-backed room (re-added 2026-08-20) — RandomX rigs on MRR.
-  XMR: 'RANDOMX',
+  BTC: 'SHA256',
 };
 
 /**

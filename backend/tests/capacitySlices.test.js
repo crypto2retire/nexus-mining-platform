@@ -62,7 +62,7 @@ test('renewal extends only the RENTAL slice and leaves SESSION slices untouched'
 test('live-capacity SQL ignores future and expired slices', async () => {
   const { getAdminStats } = require('../controllers/adminStatsController');
   const { getBacking } = require('../services/backingMonitor');
-  const backing = { ZCASH: {}, KASPA: {}, LTC_DOGE: {}, XMR: {} };
+  const backing = { ZCASH: {}, KASPA: {}, LTC_DOGE: {}, BTC: {} };
   getBacking.mockResolvedValue(backing);
   pool.query.mockResolvedValue({ rows: [] });
   const res = { json: jest.fn(), status: jest.fn(() => res) };

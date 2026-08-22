@@ -12,7 +12,7 @@ const { getOrderStatus } = require('./mrrRenter');
  * virtual credit.
  *
  * Returned units match the room's display unit (REAL_UNITS):
- *   ZCASH -> KH/s, KASPA -> GH/s, LTC_DOGE -> GH/s, XMR -> H/s
+ *   ZCASH -> KH/s, KASPA -> GH/s, LTC_DOGE -> GH/s, BTC -> TH/s
  * The payout denominator only needs per-pool consistency, so unit choice is
  * cosmetic there; the admin panel displays it directly.
  */
@@ -21,14 +21,14 @@ const WALLET_ENV = {
   ZCASH: 'MRR_PLATFORM_WALLET_ZEC',
   KASPA: 'MRR_PLATFORM_WALLET_KAS',
   LTC_DOGE: 'MRR_PLATFORM_WALLET_LTC',
-  XMR: 'XMR_WALLET_ADDRESS',
+  BTC: 'MRR_PLATFORM_WALLET_BTC',
 };
 
 const ACCOUNT_URL = {
   ZCASH: (addr) => `https://zec.2miners.com/api/accounts/${addr}`,
   KASPA: (addr) => `https://kaspa.herominers.com/api/stats_address?address=${addr}`,
-  XMR: (addr) => `https://monero.herominers.com/api/stats_address?address=${addr}`,
   LTC_DOGE: null, // handled via MRR rental averages below
+  BTC: null, // handled via MRR rental averages below
 };
 
 function walletFor(pool) {
@@ -75,12 +75,12 @@ async function rentalRealGhs(mrrRentalId) {
 
 /**
  * Live real hashrate for a room in its display unit (GH/s etc).
- * @param {string} pool ZCASH | KASPA | LTC_DOGE | XMR
- * @param {Array<{mrr_rental_id:string}>} [activeRentals] rig_rentals rows (LTC only)
+ * @param {string} pool ZCASH | KASPA | LTC_DOGE | BTC
+ * @param {Array<{mrr_rental_id:string}>} [activeRentals] rig_rentals rows
  * @returns {Promise<number|null>} null when the pool can't be measured
  */
 async function fetchLiveRealHash(pool, activeRentals = []) {
-  if (pool === 'LTC_DOGE' || pool === 'ZCASH') {
+  if (pool === 'LTC_DOGE' || pool === 'ZCASH' || pool === 'BTC') {
     // MRR rental average (what the rig itself reports, steady) is the
     // operator-facing number — MRR's own page shows "21.33K" while the pool
     // API's currentHashrate for a tiny equihash rig swings 2K→55K sample to
@@ -91,7 +91,9 @@ async function fetchLiveRealHash(pool, activeRentals = []) {
       if (r.mrr_rental_id) total += await rentalRealGhs(r.mrr_rental_id);
     }
     if (total > 0) {
-      return pool === 'ZCASH' ? total * 1e6 : total; // GH/s -> KH/s (1 GH = 1e6 KH)
+      if (pool === 'ZCASH') return total * 1e6; // GH/s -> KH/s
+      if (pool === 'BTC') return total / 1e3; // GH/s -> TH/s
+      return total;
     }
     if (pool === 'ZCASH') {
       const data = await fetchPoolAccount(pool);
@@ -99,15 +101,6 @@ async function fetchLiveRealHash(pool, activeRentals = []) {
       return Number(data.currentHashrate) / 1e3; // H/s -> KH/s
     }
     return total;
-  }
-  if (pool === 'XMR') {
-    const data = await fetchPoolAccount(pool);
-    // Prefer the 1h average (fresh rental: 24h avg dilutes with pre-rental
-    // zeros — was showing 2715 H/s while the rig delivers ~13.6 KH/s).
-    // Fall back to current, then 24h.
-    const h = data?.stats?.hashrate_1h ?? data?.stats?.hashrate ?? data?.stats?.hashrate_24h;
-    if (h == null) return null;
-    return Number(h);
   }
   if (pool === 'KASPA') {
     const data = await fetchPoolAccount(pool);

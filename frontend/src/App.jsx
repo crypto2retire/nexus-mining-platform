@@ -16,7 +16,7 @@ const POOLS = [
   { key: 'ZCASH', title: 'Zcash (ZEC) Mine' },
   { key: 'KASPA', title: 'Kaspa (KAS) Mine' },
   { key: 'LTC_DOGE', title: 'Litecoin / Dogecoin Merge' },
-  { key: 'XMR', title: 'Monero (XMR) Mine' },
+  { key: 'BTC', title: 'Bitcoin (BTC) Mine' },
 ];
 
 function storedAuth() {
@@ -156,10 +156,10 @@ export default function App() {
   };
 
   // BUY SESSION: a short hashrate slice (1h-24h, the pool's tier-2 slot in its
-  // REAL unit — ZEC/XMR 10 KH/s, KAS 25 GH/s, LTC 5 GH/s) drawn from the
+  // REAL unit — ZEC 10 KH/s, KAS 25 GH/s, LTC 5 GH/s, BTC 50 TH/s) drawn from the
   // room's SPARE real capacity — no new marketplace rental, the rig is already
   // running. Higher markup = shorter session. Idempotent like rent.
-  const SESSION_SLOT = { ZCASH: 10, KASPA: 25, LTC_DOGE: 5, XMR: 10 };
+  const SESSION_SLOT = { ZCASH: 10, KASPA: 25, LTC_DOGE: 5, BTC: 50 };
   const buySession = async (pool, hours) => {
     try {
       setError('');
@@ -239,9 +239,9 @@ export default function App() {
   const withdraw = async (pool) => {
     try {
       setError('');
-      const coinName = pool === 'ZCASH' ? 'ZEC' : pool === 'KASPA' ? 'KAS (Kaspa)' : pool === 'LTC_DOGE' ? 'LTC' : 'XMR';
+      const coinName = pool === 'ZCASH' ? 'ZEC' : pool === 'KASPA' ? 'KAS (Kaspa)' : pool === 'LTC_DOGE' ? 'LTC' : 'BTC';
       const example =
-        pool === 'ZCASH' ? 't1...' : pool === 'KASPA' ? 'kaspa:...' : pool === 'LTC_DOGE' ? 'ltc1...' : '4...';
+        pool === 'ZCASH' ? 't1...' : pool === 'KASPA' ? 'kaspa:...' : pool === 'LTC_DOGE' ? 'ltc1...' : 'bc1...';
       const amount = window.prompt(`Withdraw ${coinName} — how much? (available: ${Number(data.pending_rewards[pool] || 0).toFixed(8)})`, '');
       if (!amount) return;
       const toAddress = window.prompt(`Send ${coinName} to which address? (${example})`, '');
@@ -289,12 +289,12 @@ export default function App() {
 
   const totalHashrate = useMemo(() => {
     if (!data) return 0;
-    // Virtual credits are per-coin units (ZEC/XMR KH/s, KAS/LTC GH/s) —
+    // Virtual credits are per-coin units (ZEC KH/s, KAS/LTC GH/s, BTC TH/s) —
     // normalize to GH/s before summing so the header is honest.
     return POOLS.reduce((sum, p) => {
       const h = Number(data.rigs[p.key]?.virtual_hashrate) || 0;
-      const unit = { ZCASH: 'KH/s', KASPA: 'GH/s', LTC_DOGE: 'GH/s', XMR: 'KH/s' }[p.key];
-      return sum + (unit === 'KH/s' ? h / 1e3 : h);
+      const unit = { ZCASH: 'KH/s', KASPA: 'GH/s', LTC_DOGE: 'GH/s', BTC: 'TH/s' }[p.key];
+      return sum + (unit === 'KH/s' ? h / 1e3 : unit === 'TH/s' ? h * 1e3 : h);
     }, 0);
   }, [data]);
 

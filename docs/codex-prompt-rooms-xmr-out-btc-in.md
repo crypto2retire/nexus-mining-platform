@@ -30,7 +30,9 @@ and market facts below were verified live 2026-08-22.
 - **Pool: Ocean (ocean.xyz)** — wallet-only by design ("No KYC, only payout
   address"), payouts auto-send above **0.00065536 BTC** (verified on their
   homepage), pays the Bitcoin address directly, no account. Stratum
-  `ocean.xyz:3333`, username = the platform BTC address, pass `x`. Platform
+  `mine.ocean.xyz:3334` (Ocean's default Stratum endpoint — verified live
+  2026-08-22 via mining.subscribe), username = the platform BTC address, pass
+  `x`. Platform
   BTC wallet (provided by Kevin 2026-08-22):
   `bc1qfclp7n4nqf980fq77rq6euha8ft8q92cysqlgg` (valid bech32 P2WPKH —
   checksum-verified).
@@ -145,7 +147,7 @@ the Ocean pool username (payout destination), and the Blockcypher watch
 target. After review, the operator: applies migration 025, sets the env vars
 (`MRR_PLATFORM_WALLET_BTC=bc1qfclp7n4nqf980fq77rq6euha8ft8q92cysqlgg`),
 creates the MRR SHA-256 pool profile via API (`PUT /account/profile` + `PUT
-/account/profile/{id}` with `ocean.xyz:3333`, user =
+/account/profile/{id}` with `mine.ocean.xyz:3334`, user =
 `bc1qfclp7n4nqf980fq77rq6euha8ft8q92cysqlgg`, pass x), sets
 `MRR_POOL_PROFILE_SHA256=<id>`, deletes `payout_watch` rows for XMR, rebuilds
 the frontend, restarts.

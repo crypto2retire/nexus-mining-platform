@@ -78,7 +78,7 @@ describe('adminStatsController.getAdminStats', () => {
       KASPA: { mined_total: 100, fetched_at: '2026-08-20T06:00:00Z' },
       ZCASH: { mined_total: 0 },
       LTC_DOGE: { mined_total: 0 },
-      XMR: { mined_total: 0 },
+      BTC: { mined_total: 0 },
       generated_at: '2026-08-20T06:00:00Z',
       cache_ttl_ms: 60000,
     });
@@ -107,7 +107,7 @@ describe('adminStatsController.getAdminStats', () => {
       KASPA: { mined_total: 0 },
       ZCASH: { mined_total: 0 },
       LTC_DOGE: { mined_total: 0 },
-      XMR: { mined_total: 0 },
+      BTC: { mined_total: 0 },
       generated_at: '2026-08-20T06:00:00Z',
     });
 
@@ -117,7 +117,7 @@ describe('adminStatsController.getAdminStats', () => {
     expect(res.statusCode).toBe(200);
     expect(res.body.capacity_by_pool).toEqual({});
     // LIVE production comes from Real Backing — every pool is present even at 0.
-    expect(Object.keys(res.body.payouts_by_pool).sort()).toEqual(['KASPA', 'LTC_DOGE', 'XMR', 'ZCASH']);
+    expect(Object.keys(res.body.payouts_by_pool).sort()).toEqual(['BTC', 'KASPA', 'LTC_DOGE', 'ZCASH']);
     expect(res.body.payouts_by_pool.KASPA.total_crypto).toBe(0);
     expect(res.body.ledger_by_pool).toEqual({});
     expect(res.body.treasury.protocol_revenue_usdc).toBe(0);

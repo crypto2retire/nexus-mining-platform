@@ -19,10 +19,10 @@ const ALGO_CONFIG = {
     coins: { ZEC: { id: 'zcash', production: 0.002060 } },
     anchorGhs: 30.55e-6,
   },
-  randomx: {
-    targetPool: 'XMR', profileSuffix: 'RANDOMX', primaryCoin: 'XMR',
-    coins: { XMR: { id: 'monero', production: 0.000479 } },
-    anchorGhs: 14.25e-6,
+  sha256: {
+    targetPool: 'BTC', profileSuffix: 'SHA256', primaryCoin: 'BTC',
+    coins: { BTC: { id: 'bitcoin', production: 0.000262 } },
+    anchorGhs: 500e3,
   },
   scrypt: {
     targetPool: 'LTC_DOGE', profileSuffix: 'SCRYPT', primaryCoin: 'LTC',
@@ -281,7 +281,9 @@ function marketStatsFor({ algo, btcUsd, algorithmRows }) {
 function storageHashrateFor(algo, rig) {
   const ghs = advertisedGhs(rig);
   if (!ghs) return null;
-  return algo === 'equihash' || algo === 'randomx' ? ghs * 1e6 : ghs;
+  if (algo === 'equihash') return ghs * 1e6;
+  if (algo === 'sha256') return ghs / 1e3;
+  return ghs;
 }
 
 module.exports = {

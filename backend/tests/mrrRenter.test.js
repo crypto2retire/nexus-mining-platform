@@ -12,6 +12,8 @@ const {
   POOL_ALGORITHM_MAP,
   PROVIDER_NAME,
   LIVE_ORDERS_ENV,
+  advertisedInBase,
+  meetsAdvertisedMinimum,
 } = require('../services/mrrRenter');
 
 const REAL_ENV = { ...process.env };
@@ -117,8 +119,16 @@ describe('placeHashpowerOrder (MRR)', () => {
       ZCASH: 'EQUIHASH',
       KASPA: 'KHEAVYHASH',
       LTC_DOGE: 'SCRYPT',
-      XMR: 'RANDOMX',
+      BTC: 'SHA256',
     });
+  });
+
+  test('normalizes SHA-256 rigs to TH/s and filters listings below 100 TH/s', () => {
+    const rig = (hash, type) => ({ hashrate: { advertised: { hash, type } } });
+    expect(advertisedInBase(rig(0.5, 'ph'), 'sha256')).toBe(500);
+    expect(advertisedInBase(rig(100000, 'gh'), 'sha256')).toBe(100);
+    expect(meetsAdvertisedMinimum(rig(99.99, 'th'), 'sha256')).toBe(false);
+    expect(meetsAdvertisedMinimum(rig(100, 'th'), 'sha256')).toBe(true);
   });
 
   test('live order: finds cheapest affordable rig and posts the rental', async () => {

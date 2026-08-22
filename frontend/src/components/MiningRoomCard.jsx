@@ -4,15 +4,15 @@ const COIN_NAMES = {
   ZCASH: 'ZEC',
   KASPA: 'KAS',
   LTC_DOGE: 'LTC',
-  XMR: 'XMR',
+  BTC: 'BTC',
 };
 
-// Per-coin hashrate unit matching the REAL rigs (2026-08-20): ZEC/XMR rigs are
-// KH/s-scale, KAS/LTC are GH/s-scale. The game no longer sells "25 GH/s of
+// Per-coin hashrate unit matching the REAL rigs: ZEC is KH/s-scale, KAS/LTC
+// are GH/s-scale, and BTC is TH/s-scale. The game no longer sells "25 GH/s of
 // everything" — credits are denominated in the room's real unit.
-const POOL_UNITS = { ZCASH: 'KH/s', KASPA: 'GH/s', LTC_DOGE: 'GH/s', XMR: 'KH/s' };
+const POOL_UNITS = { ZCASH: 'KH/s', KASPA: 'GH/s', LTC_DOGE: 'GH/s', BTC: 'TH/s' };
 // Session slot = tier-2 hashrate in the pool's unit (one unit of the room).
-const SESSION_SLOT = { ZCASH: 10, KASPA: 25, LTC_DOGE: 5, XMR: 10 };
+const SESSION_SLOT = { ZCASH: 10, KASPA: 25, LTC_DOGE: 5, BTC: 50 };
 
 const RENTAL_HOURS = 72;
 
@@ -45,11 +45,13 @@ export default function MiningRoomCard({
   const etaText = ps?.eta_hours != null ? fmtEta(ps.eta_hours) : null;
 
   // Session picker: spare_ghs arrives ALREADY in GH/s (backend converts the
-  // pool's display unit — KH/s/H/s — to GH/s before subtracting credits).
+  // pool's display unit — KH/s/GH/s/TH/s — to GH/s before subtracting credits).
   // The per-coin session slot (tier-2 hashrate) is also converted to GH/s so
-  // the comparison works across units (ZEC/XMR slot 10 KH/s = 0.01 GH/s).
+  // the comparison works across units.
   const spareGhsNorm = spareGhs == null ? null : Number(spareGhs);
-  const slotGhs = (SESSION_SLOT[pool] || 25) * (POOL_UNITS[pool] === 'KH/s' ? 1e-3 : 1);
+  const unitToGhs = POOL_UNITS[pool] === 'KH/s' ? 1e-3 : POOL_UNITS[pool] === 'TH/s' ? 1e3 : 1;
+  const slotGhs = (SESSION_SLOT[pool] || 25) * unitToGhs;
+  const spareInPoolUnit = spareGhsNorm == null ? null : spareGhsNorm / unitToGhs;
   const canSell = spareGhsNorm != null && spareGhsNorm >= slotGhs;
 
   // Live countdown while the rental window is active.
@@ -204,9 +206,9 @@ export default function MiningRoomCard({
         <div className="session-picker">
           <div className="session-picker-head">
             <span className="session-picker-title">⚡ Short sessions — {SESSION_SLOT[pool] || 25} {POOL_UNITS[pool] || 'GH/s'} slice</span>
-            {spareGhs != null && (
+            {spareInPoolUnit != null && (
               <span className={`session-spare ${canSell ? '' : 'session-spare-low'}`}>
-                Spare: {spareGhs >= 100 ? spareGhs.toFixed(0) : spareGhs.toFixed(1)} {POOL_UNITS[pool] || 'GH/s'}
+                Spare: {spareInPoolUnit >= 100 ? spareInPoolUnit.toFixed(0) : spareInPoolUnit.toFixed(1)} {POOL_UNITS[pool] || 'GH/s'}
               </span>
             )}
           </div>

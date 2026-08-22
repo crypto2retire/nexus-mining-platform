@@ -2,6 +2,8 @@ const {
   buildMarketView,
   calculateProfitability,
   marketStatsFor,
+  configFor,
+  storageHashrateFor,
 } = require('../services/operatorMarketService');
 
 const KAS_RIG = {
@@ -60,6 +62,25 @@ test('ZEC profitability uses the observed 30.55 kSol/s delivery anchor', () => {
   expect(result.revenue_day).toBeCloseTo(0.0824, 12);
   expect(result.net_current).toBeCloseTo(0.0584, 12);
   expect(result.break_even_price).toBeCloseTo(0.024 / 0.002060, 12);
+});
+
+test('BTC profitability uses the verified 500 TH/s production anchor', () => {
+  const result = calculateProfitability({
+    algo: 'sha256',
+    hashrateGhs: 500000,
+    usdPerHour: 1,
+    minHours: 12,
+    spots: { BTC: 80000 },
+  });
+
+  expect(result.arithmetic.anchor_ghs).toBe(500000);
+  expect(result.arithmetic.production_day.BTC).toBeCloseTo(0.000262, 12);
+  expect(result.revenue_day).toBeCloseTo(20.96, 12);
+  expect(result.cost_day).toBe(24);
+  expect(result.net_day).toBeCloseTo(-3.04, 12);
+  expect(storageHashrateFor('sha256', {
+    hashrate: { advertised: { hash: 500, type: 'th' } },
+  })).toBe(500);
 });
 
 test('market ranking filters junk, prefers verified available rigs, and sorts table by net day', () => {

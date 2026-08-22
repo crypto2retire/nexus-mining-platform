@@ -40,8 +40,7 @@ const POOL_ALGORITHM_MAP = {
   ZCASH: 'EQUIHASH',
   KASPA: 'KHEAVYHASH',
   LTC_DOGE: 'SCRYPT',
-  // XMR is a rental-backed room (re-added 2026-08-20) — RandomX rigs on MRR.
-  XMR: 'RANDOMX',
+  BTC: 'SHA256',
 };
 
 const PROVIDER_NAME = 'MRR';
@@ -174,20 +173,20 @@ function rpiOf(rig) {
 //   equihash = KH/s (ZEC rigs: real GPU/ASIC 50-500 KH/s; tiny CPU junk below)
 //   kheavyhash = TH/s (KS0+ 0.1-12.6 TH/s; CPU junk is far below)
 //   scrypt = GH/s (L3+/L9 0.5-17 GH/s; CPU listings are 25 KH/s = 0.000025 GH/s)
-//   randomx = MH/s (real CPU/GPU RandomX rigs 0.01-5 MH/s; tiny CPU junk below)
+//   sha256 = TH/s (real SHA-256 ASIC rigs; filter listings below 100 TH/s)
 // Note: "zhash" (Equihash 144,5) is intentionally NOT in this map — ZCASH now
 // routes through "equihash" (Equihash 192,7 / Zcash), not zhash.
 const MIN_ADVERTISED = {
   equihash: 10,
   kheavyhash: 0.05,
   scrypt: 0.5,
-  randomx: 0.01,
+  sha256: 100,
 };
 const HASH_TYPE_TO_BASE = {
   equihash: { kh: 1, mh: 1e3, gh: 1e6, th: 1e9 },
   kheavyhash: { kh: 1e-9, mh: 1e-6, gh: 1e-3, th: 1 },
   scrypt: { kh: 1e-6, mh: 1e-3, gh: 1, th: 1e3 },
-  randomx: { kh: 1e-3, mh: 1, gh: 1e3, th: 1e6 },
+  sha256: { h: 1e-12, kh: 1e-9, mh: 1e-6, gh: 1e-3, th: 1, ph: 1e3 },
 };
 
 // MRR rejects orders whose TOTAL cost is below this floor (verified 2026-08-19

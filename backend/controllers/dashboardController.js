@@ -28,7 +28,7 @@ async function getPayoutHistory(client, userId) {
                 WHEN 'ZCASH' THEN 'ZEC'
                 WHEN 'KASPA' THEN 'KAS'
                 WHEN 'LTC_DOGE' THEN 'LTC'
-                WHEN 'XMR' THEN 'XMR'
+                WHEN 'BTC' THEN 'BTC'
                 ELSE NULL
               END AS symbol,
               ledger.status
@@ -130,7 +130,7 @@ async function getDashboard(req, res) {
       );
       const rates = await client.query('SELECT pool, usdc_per_ghs_per_day FROM pool_maintenance_rates');
 
-      const pools = ['ZCASH', 'KASPA', 'LTC_DOGE', 'XMR'];
+      const pools = ['ZCASH', 'KASPA', 'LTC_DOGE', 'BTC'];
       const rigsByPool = {};
       const upgradeCostByPool = {};
       const renewCostByPool = {};
@@ -169,8 +169,8 @@ async function getDashboard(req, res) {
         upgradeCostByPool[pool] = nextTier ? nextTier.cost : null;
         const currentTier = tiersFor(pool).find((t) => t.level === level);
         renewCostByPool[pool] = currentTier && currentTier.cost > 0 ? currentTier.cost : null;
-        // Session ladder for the tier-2 SLOT (each pool's real unit — ZEC/XMR
-        // KH/s, KAS/LTC GH/s). Multi-coin discount already applied — the card
+        // Session ladder for the tier-2 SLOT (each pool's real unit — ZEC
+        // KH/s, KAS/LTC GH/s, BTC TH/s). Multi-coin discount already applied — the card
         // shows the discounted price. Session slot = tier 2 hashrate so a
         // session is one unit of what the room really delivers.
         sessionPricesByPool[pool] = {};
@@ -204,8 +204,8 @@ async function getDashboard(req, res) {
 
       // HYBRID spare capacity: what the room's real rigs produce MINUS all
       // active credits (operator baseline included) = sellable inventory.
-      // Credits are denominated in each pool's REAL unit (ZEC/XMR KH/s,
-      // KAS/LTC GH/s) — convert both sides to GH/s before subtracting.
+      // Credits are denominated in each pool's REAL unit (ZEC KH/s,
+      // KAS/LTC GH/s, BTC TH/s) — convert both sides to GH/s before subtracting.
       const spareRows = await client.query(
         `SELECT target_pool,
                 COALESCE(SUM(virtual_hashrate) FILTER (
@@ -219,9 +219,10 @@ async function getDashboard(req, res) {
       const activeGhsByPool = {};
       for (const row of spareRows.rows) {
         // KH/s credits are 1000x smaller than GH/s — convert to GH/s.
-        const unit = { ZCASH: 'KH/s', XMR: 'KH/s' }[row.target_pool] || 'GH/s';
-        activeGhsByPool[row.target_pool] =
-          unit === 'KH/s' ? Number(row.active_ghs) / 1e3 : Number(row.active_ghs);
+        const unit = { ZCASH: 'KH/s', BTC: 'TH/s' }[row.target_pool] || 'GH/s';
+        activeGhsByPool[row.target_pool] = unit === 'KH/s'
+          ? Number(row.active_ghs) / 1e3
+          : unit === 'TH/s' ? Number(row.active_ghs) * 1e3 : Number(row.active_ghs);
       }
       const backing = await getBacking();
       const spareGhsByPool = {};
@@ -229,22 +230,19 @@ async function getDashboard(req, res) {
         const real = backing[pool]?.real_hash;
         const unit = backing[pool]?.real_unit || 'GH/s';
         const active = activeGhsByPool[pool] || 0;
-        // real_hash arrives in the pool's DISPLAY unit (KH/s for ZEC, H/s
-        // for XMR, GH/s for KAS/LTC) while active credits are always GH/s.
-        // Convert both to GH/s before subtracting — previously XMR spare
-        // was 2715 H/s − 25 GH/s = 2690 (nonsense, showed fake spare on an
-        // oversold room).
+        // real_hash arrives in the pool's DISPLAY unit (KH/s for ZEC, TH/s
+        // for BTC, GH/s for KAS/LTC). Convert both sides to GH/s.
         const realGhs =
           unit === 'KH/s' ? Number(real) / 1e3
-          : unit === 'H/s' ? Number(real) / 1e9
+          : unit === 'TH/s' ? Number(real) * 1e3
           : Number(real);
         spareGhsByPool[pool] = real == null ? null : Math.max(0, realGhs - active);
       }
 
       // Pool payout status per room: what the pool owes the wallet (unpaid),
       // the pool's minimum payout, progress toward it, and the observed rate
-      // ETA. Only unpaid-type pools (KAS/ZEC/XMR) get an ETA — LTC/DOGE are
-      // on-chain balance watches (we can't see F2Pool's internal unpaid).
+      // ETA. Only unpaid-type pools (KAS/ZEC) get an ETA — LTC/DOGE and BTC
+      // are on-chain balance watches (we cannot see pool-internal unpaid).
       const observedRates = await getObservedRates();
       const payoutStatus = {};
       for (const pool of pools) {
@@ -258,7 +256,7 @@ async function getDashboard(req, res) {
         }
         payoutStatus[pool] = {
           unpaid: unpaid != null ? Number(unpaid) : null,
-          unpaid_unit: { ZCASH: 'ZEC', KASPA: 'KAS', LTC_DOGE: 'LTC', XMR: 'XMR' }[pool],
+          unpaid_unit: { ZCASH: 'ZEC', KASPA: 'KAS', LTC_DOGE: 'LTC', BTC: 'BTC' }[pool],
           threshold,
           progress_pct:
             threshold != null && unpaid != null && threshold > 0

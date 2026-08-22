@@ -2,7 +2,8 @@ jest.mock('../config/db', () => ({
   pool: { query: jest.fn(), connect: jest.fn() },
 }));
 
-const { computePayoutEvent, WATCHES } = require('../services/payoutTrigger');
+const { computePayoutEvent, WATCHES, PAYOUT_MIN } = require('../services/payoutTrigger');
+const { ACCRUAL_POOLS } = require('../services/accrualDistributor');
 
 describe('DOGE merged watch (011)', () => {
   test('LTC_DOGE_DOGE watches the platform DOGE wallet and routes to merged distribution', () => {
@@ -11,6 +12,9 @@ describe('DOGE merged watch (011)', () => {
     expect(cfg.walletEnv).toBe('MRR_PLATFORM_WALLET_DOGE');
     expect(cfg.distribute).toBe('merged');
     expect(cfg.gamePool).toBe('LTC_DOGE');
+    // 2026-08-22 fix: on-chain balance-delta watches must distribute on
+    // arrival — never the accrual-recording path (or players get nothing).
+    expect(cfg.settlementGated).toBe(true);
     // Blockcypher returns DOGE in smallest units — normalize to whole DOGE.
     expect(cfg.balanceOf({ balance: 123456789 })).toBeCloseTo(1.23456789, 6);
   });
@@ -44,21 +48,25 @@ describe('pool watches (2Miners ZEC / HeroMiners KAS) — balance normalization 
   });
 });
 
-describe('XMR herominers watch (rental-backed room, re-added 2026-08-20)', () => {
-  test('XMR watches the platform wallet via unpaid-drop mode', () => {
-    const cfg = WATCHES.XMR;
-    expect(cfg).toBeTruthy();
-    expect(cfg.mode).toBe('unpaid-drop');
-    expect(cfg.walletEnv).toBe('XMR_WALLET_ADDRESS');
-    expect(cfg.accountUrl('4test')).toContain('monero.herominers.com/api/stats_address');
+describe('BTC Ocean settlement watch', () => {
+  test('watches the platform BTC wallet through Blockcypher balance deltas', () => {
+    const cfg = WATCHES.BTC;
+    expect(cfg.mode).toBe('balance-delta');
+    expect(cfg.walletEnv).toBe('MRR_PLATFORM_WALLET_BTC');
+    expect(cfg.accountUrl('bc1test')).toContain('api.blockcypher.com/v1/btc/main/addrs/bc1test');
+    expect(cfg.gamePool).toBe('BTC');
+    expect(cfg.settlementGated).toBe(true);
+    expect(cfg.minPayout).toBe(0.00065536);
+    expect(PAYOUT_MIN.BTC).toBe(0.00065536);
   });
 
-  test('XMR balanceOf scales herominers atomic units (1 XMR = 1e12)', () => {
-    const cfg = WATCHES.XMR;
-    // Verified live 2026-08-20: stats.balance = "274144378" (atomic units).
-    expect(cfg.balanceOf({ stats: { balance: '274144378' } })).toBeCloseTo(0.000274144378, 12);
-    // The unlocked array is colon-separated strings — never summed.
-    expect(cfg.balanceOf({ stats: { balance: '0' } })).toBe(0);
+  test('normalizes Blockcypher satoshis to BTC', () => {
+    expect(WATCHES.BTC.balanceOf({ balance: 65536 })).toBe(0.00065536);
+  });
+
+  test('keeps BTC out of the accrual distributor', () => {
+    expect(ACCRUAL_POOLS).toEqual(['ZCASH', 'KASPA']);
+    expect(ACCRUAL_POOLS).not.toContain('BTC');
   });
 });
 

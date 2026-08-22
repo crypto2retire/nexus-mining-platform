@@ -11,8 +11,8 @@ const { fetchLiveRealHash } = require('./roomHash');
  *   virtual_ghs / rigs_sold  — what players bought in the game (virtual rigs)
  *   active_rentals           — real MRR rentals currently running (rig_rentals)
  *   real_hash / real_unit    — measured hashrate landing at the pool wallet
- *                              (2Miners currentHashrate for ZEC/KAS; MRR rental
- *                              average for LTC; herominers hashrate_24h for XMR)
+ *                              (pool API for ZEC/KAS; MRR rental averages for
+ *                              LTC and BTC)
  *   pool_unpaid              — unpaid balance sitting at the pool (display units)
  *   mined_total / mined_2    — real payouts received (real_pool_payouts)
  *
@@ -21,12 +21,12 @@ const { fetchLiveRealHash } = require('./roomHash');
  */
 
 const TTL_MS = 60000;
-const POOLS = ['ZCASH', 'KASPA', 'LTC_DOGE', 'XMR'];
+const POOLS = ['ZCASH', 'KASPA', 'LTC_DOGE', 'BTC'];
 
 // Display unit per pool for real hashrate (natural scale).
-const REAL_UNITS = { ZCASH: 'KH/s', KASPA: 'GH/s', LTC_DOGE: 'GH/s', XMR: 'H/s' };
+const REAL_UNITS = { ZCASH: 'KH/s', KASPA: 'GH/s', LTC_DOGE: 'GH/s', BTC: 'TH/s' };
 // Pool balances come back in smallest units — scale for display.
-const POOL_DECIMALS = { ZCASH: 8, KASPA: 8, LTC_DOGE: 8, XMR: 12 };
+const POOL_DECIMALS = { ZCASH: 8, KASPA: 8, LTC_DOGE: 8, BTC: 8 };
 
 let cache = null;
 let cacheAt = 0;
@@ -59,7 +59,7 @@ async function buildBacking() {
     pool.query(
       // ACTIVE credits only — expired 0-GH/s rigs are NOT "sold" (Kevin
       // 2026-08-20: "Rigs sold 1" with 0 GH/s and no real backing confused
-      // the LTC/XMR rows).
+      // the LTC/BTC rows).
       `SELECT target_pool, COALESCE(SUM(virtual_hashrate),0) AS vghs,
               COUNT(DISTINCT user_id) AS rigs
          FROM capacity_slices
@@ -136,9 +136,9 @@ async function buildBacking() {
       real_hash: realHash,
       real_unit: REAL_UNITS[poolName],
       pool_unpaid: unpaid,
-      pool_unpaid_unit: { ZCASH: 'ZEC', KASPA: 'KAS', LTC_DOGE: 'LTC', XMR: 'XMR' }[poolName],
+      pool_unpaid_unit: { ZCASH: 'ZEC', KASPA: 'KAS', LTC_DOGE: 'LTC', BTC: 'BTC' }[poolName],
       // LIVE production (computed above at read time) — never a stale
-      // snapshot. For unpaid-drop pools (KAS/ZEC/XMR): current unpaid + all
+      // snapshot. For unpaid-drop pools (KAS/ZEC): current unpaid + all
       // settled pool payments. For balance-delta (LTC/DOGE): the on-chain
       // balance already received.
       mined_total: minedLive,

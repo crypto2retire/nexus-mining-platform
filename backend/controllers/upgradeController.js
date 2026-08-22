@@ -28,17 +28,19 @@ function getRenter() {
  * No maintenance fund, no DORMANT, no mine-at-loss: when the window ends the
  * rig stops contributing until renewed manually.
  *
- *   KASPA/XMR (cheap to back):  $5 / $10 / $25 / $50
+ *   KASPA (cheap to back):      $5 / $10 / $25 / $50
  *   ZCASH (mid):                 $20 / $40 / $100 / $200
  *   LTC_DOGE (expensive rigs):   $50 / $120 / $300 / $750
+ *   BTC (whale-scale SHA-256):   $100 / $250 / $500 / $1000
  *
  * UNITS (2026-08-20, Kevin: "it is renting 25 GH/s for all tokens, yet most
  * of our miners are not producing that much"): tier hashrates are now in each
  * pool's REAL unit so credit can never exceed the real rig —
- *   ZCASH KH/s, KASPA GH/s, LTC_DOGE GH/s, XMR KH/s
+ *   ZCASH KH/s, KASPA GH/s, LTC_DOGE GH/s, BTC TH/s
  * Prices unchanged; only the hashrate denomination is honest now.
  */
-const POOL_UNITS = { ZCASH: 'KH/s', KASPA: 'GH/s', LTC_DOGE: 'GH/s', XMR: 'KH/s' };
+const POOL_UNITS = { ZCASH: 'KH/s', KASPA: 'GH/s', LTC_DOGE: 'GH/s', BTC: 'TH/s' };
+const VALID_POOLS = Object.freeze(Object.keys(POOL_UNITS));
 
 const POOL_TIERS = {
   ZCASH: [
@@ -62,12 +64,12 @@ const POOL_TIERS = {
     { level: 4, cost: 300, hashrate: 30 },
     { level: 5, cost: 750, hashrate: 60 },
   ],
-  XMR: [
-    { level: 1, cost: 0, hashrate: 2 },
-    { level: 2, cost: 5, hashrate: 10 },
-    { level: 3, cost: 10, hashrate: 25 },
-    { level: 4, cost: 25, hashrate: 60 },
-    { level: 5, cost: 50, hashrate: 120 },
+  BTC: [
+    { level: 1, cost: 0, hashrate: 0 },
+    { level: 2, cost: 100, hashrate: 50 },
+    { level: 3, cost: 250, hashrate: 120 },
+    { level: 4, cost: 500, hashrate: 300 },
+    { level: 5, cost: 1000, hashrate: 700 },
   ],
 };
 
@@ -128,7 +130,7 @@ async function upgradeRig(req, res) {
     return res.status(400).json({ error: 'request_id is required (1-64 chars) for idempotent upgrades' });
   }
 
-  if (!['ZCASH', 'KASPA', 'LTC_DOGE', 'XMR'].includes(targetPool)) {
+  if (!VALID_POOLS.includes(targetPool)) {
     return res.status(400).json({ error: 'Invalid target pool' });
   }
 
@@ -373,7 +375,7 @@ async function reinvestRig(req, res) {
     return res.status(400).json({ error: 'request_id is required (1-64 chars) for idempotent upgrades' });
   }
 
-  if (!['ZCASH', 'KASPA', 'LTC_DOGE', 'XMR'].includes(targetPool)) {
+  if (!VALID_POOLS.includes(targetPool)) {
     return res.status(400).json({ error: 'Invalid target pool' });
   }
 
@@ -516,7 +518,7 @@ async function buySession(req, res) {
   if (!requestId || requestId.length > 64) {
     return res.status(400).json({ error: 'request_id is required (1-64 chars) for idempotent sessions' });
   }
-  if (!['ZCASH', 'KASPA', 'LTC_DOGE', 'XMR'].includes(targetPool)) {
+  if (!VALID_POOLS.includes(targetPool)) {
     return res.status(400).json({ error: 'Invalid target pool' });
   }
   if (!(hours in SESSION_HOURS)) {
@@ -538,9 +540,10 @@ async function buySession(req, res) {
   let realHash;
   try {
     let activeRentals = [];
-    if (targetPool === 'LTC_DOGE') {
+    if (targetPool === 'LTC_DOGE' || targetPool === 'BTC') {
       const r = await pool.query(
-        "SELECT mrr_rental_id FROM rig_rentals WHERE target_pool = 'LTC_DOGE' AND status = 'ACTIVE'"
+        "SELECT mrr_rental_id FROM rig_rentals WHERE target_pool = $1 AND status = 'ACTIVE'",
+        [targetPool]
       );
       activeRentals = r.rows;
     }

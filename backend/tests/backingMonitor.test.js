@@ -12,7 +12,7 @@ jest.mock('../services/mrrRenter', () => ({
 
 const axios = require('axios');
 const { pool } = require('../config/db');
-const { getBacking, buildBacking, TTL_MS } = require('../services/backingMonitor');
+const { getBacking, buildBacking, TTL_MS, POOLS } = require('../services/backingMonitor');
 
 function mockPool(overrides = {}) {
   pool.query.mockImplementation(async (sql) => {
@@ -51,7 +51,7 @@ describe('buildBacking', () => {
     process.env.MRR_PLATFORM_WALLET_KAS = 'kaspa:test';
     process.env.MRR_PLATFORM_WALLET_LTC = 'ltc1test';
     process.env.MRR_PLATFORM_WALLET_DOGE = 'dtest';
-    process.env.XMR_WALLET_ADDRESS = '4test';
+    process.env.MRR_PLATFORM_WALLET_BTC = 'bc1test';
   });
 
   beforeEach(() => {
@@ -71,15 +71,6 @@ describe('buildBacking', () => {
       }
       if (url.includes('blockcypher.com')) {
         return { data: { balance: 0 } };
-      }
-      if (url.includes('monero.herominers.com')) {
-        // herominers stats_address: unpaid balance in atomic units (1e12),
-        // hashrate_24h in H/s.
-        return {
-          data: {
-            stats: { balance: '274144378', hashrate_24h: 2691.67 },
-          },
-        };
       }
       return { data: {} };
     });
@@ -101,12 +92,6 @@ describe('buildBacking', () => {
     // Mock supplies a settled POOL_PAYMENT row (1.2345), so mined = 1.2059 + 1.2345.
     expect(backing.KASPA.mined_total).toBeCloseTo(1.2059 + 1.2345, 4);
 
-    // XMR: hashrate_24h in H/s, unpaid scaled from herominers atoms.
-    expect(backing.XMR.virtual_ghs).toBe(0);
-    expect(backing.XMR.real_hash).toBeCloseTo(2691.67, 2);
-    expect(backing.XMR.real_unit).toBe('H/s');
-    expect(backing.XMR.pool_unpaid).toBeCloseTo(0.000274144378, 12);
-    expect(backing.XMR.pool_unpaid_unit).toBe('XMR');
   });
 
   it('uses MRR rental averages for LTC real hashrate', async () => {
@@ -126,6 +111,31 @@ describe('buildBacking', () => {
     expect(backing.LTC_DOGE.real_hash).toBeCloseTo(7.375, 3);
   });
 
+  it('reports BTC MRR rental averages in TH/s and Blockcypher balance in BTC', async () => {
+    mockPool({
+      rentals: [
+        { rig_id: 'btc-r1', target_pool: 'BTC', mrr_rental_id: 'btc-rental-1', rig_name: 'SHA-256 500T', rig_rpi: '98', cost_usd: '12', length_hours: 24 },
+      ],
+      payouts: [],
+    });
+    const { getOrderStatus } = require('../services/mrrRenter');
+    getOrderStatus.mockResolvedValue({
+      data: { hashrate: { average: { hash: '500', type: 'th' } } },
+    });
+    axios.get.mockImplementation(async (url) => (
+      url.includes('/v1/btc/main/addrs/')
+        ? { data: { balance: 65536 } }
+        : { data: {} }
+    ));
+
+    const backing = await buildBacking();
+    expect(POOLS).toEqual(['ZCASH', 'KASPA', 'LTC_DOGE', 'BTC']);
+    expect(backing.BTC.real_hash).toBe(500);
+    expect(backing.BTC.real_unit).toBe('TH/s');
+    expect(backing.BTC.pool_unpaid).toBe(0.00065536);
+    expect(backing.BTC.pool_unpaid_unit).toBe('BTC');
+  });
+
   it('degrades to nulls when live fetches fail — never throws', async () => {
     axios.get.mockRejectedValue(new Error('ECONNREFUSED'));
     const backing = await buildBacking();
@@ -141,7 +151,7 @@ describe('getBacking cache', () => {
     process.env.MRR_PLATFORM_WALLET_KAS = 'kaspa:test';
     process.env.MRR_PLATFORM_WALLET_LTC = 'ltc1test';
     process.env.MRR_PLATFORM_WALLET_DOGE = 'dtest';
-    process.env.XMR_WALLET_ADDRESS = '4test';
+    process.env.MRR_PLATFORM_WALLET_BTC = 'bc1test';
   });
 
   beforeEach(() => {

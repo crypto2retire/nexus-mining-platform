@@ -14,7 +14,7 @@ const {
   storageHashrateFor,
 } = require('../services/operatorMarketService');
 
-const VALID_ALGOS = new Set(['kheavyhash', 'scrypt', 'equihash', 'randomx']);
+const VALID_ALGOS = new Set(['kheavyhash', 'scrypt', 'equihash', 'sha256']);
 
 function operatorAllowed(req, res) {
   const configured = String(process.env.OPERATOR_WALLET || '').trim().toLowerCase();

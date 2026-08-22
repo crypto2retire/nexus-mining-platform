@@ -19,7 +19,7 @@ export default function GetStarted({ depositAddress }) {
           <h3>How to start mining with Nexus</h3>
           <p className="get-started-intro">
             Nexus rents <strong>real</strong> mining hashrate (Zcash, Kaspa, Litecoin/Dogecoin,
-            Monero) and pays you a pro-rata share of what it mines while your rental is active.
+            Bitcoin) and pays you a pro-rata share of what it mines while your rental is active.
             Here's how to set up your account:
           </p>
 
@@ -51,8 +51,8 @@ export default function GetStarted({ depositAddress }) {
               <strong>Rent hashrate.</strong> Click <strong>Rent 72h</strong> on any room card.
               Your payment rents a <strong>real</strong> mining rig for 72 hours — you never buy
               anything, you just rent mining time, exactly like renting a server. Entry prices
-              follow real rental costs — Kaspa and Monero start at <strong>$5</strong>, Zcash at{' '}
-              <strong>$20</strong>, Litecoin at <strong>$50</strong>.
+              follow real rental costs — Kaspa starts at <strong>$5</strong>, Zcash at{' '}
+              <strong>$20</strong>, Litecoin at <strong>$50</strong>, and Bitcoin at <strong>$100</strong>.
             </li>
             <li>
               <strong>Earn while your rental runs.</strong> Every pool payout is split pro-rata
@@ -69,7 +69,7 @@ export default function GetStarted({ depositAddress }) {
           </ol>
 
           <div className="get-started-tip">
-            <strong>Heads up:</strong> mining addresses (Monero, Zcash, Kaspa, Bitcoin) can't be
+            <strong>Heads up:</strong> mining addresses (Zcash, Kaspa, Litecoin, Bitcoin) can't be
             used to sign in — Nexus accounts use Ethereum wallets only. Never type or share your
             recovery phrase with Nexus or anyone claiming to represent it.
           </div>

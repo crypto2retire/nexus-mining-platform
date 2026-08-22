@@ -54,7 +54,7 @@ const POOL_COINGECKO = {
   ZCASH: 'zcash',
   KASPA: 'kaspa',
   LTC_DOGE: 'litecoin',
-  XMR: 'monero',
+  BTC: 'bitcoin',
   // Synthetic key: the DOGE side of the LTC_DOGE merged pool.
   LTC_DOGE_DOGE: 'dogecoin',
 };
@@ -306,7 +306,7 @@ const ADDRESS_RULES = {
   ZCASH: /^t1[a-zA-Z0-9]{33}$/,
   KASPA: /^kaspa:[a-z0-9]{60,64}$/i,
   LTC_DOGE: /^(ltc1[a-z0-9]{38}|[LM3][a-zA-Z0-9]{33})$/i,
-  XMR: /^4[0-9AB][1-9A-HJ-NP-Za-km-z]{93}$/,
+  BTC: /^(bc1[ac-hj-np-z02-9]{11,71}|[13][a-km-zA-HJ-NP-Z1-9]{25,34})$/i,
 };
 
 async function withdrawRewards(req, res) {
@@ -324,7 +324,7 @@ async function withdrawRewards(req, res) {
   if (!ADDRESS_RULES[targetPool].test(toAddress)) {
     return res.status(400).json({
       error: `Invalid ${targetPool} destination address (e.g. ${
-        targetPool === 'ZCASH' ? 't1...' : targetPool === 'KASPA' ? 'kaspa:...' : targetPool === 'LTC_DOGE' ? 'ltc1...' : '4...'
+        targetPool === 'ZCASH' ? 't1...' : targetPool === 'KASPA' ? 'kaspa:...' : targetPool === 'LTC_DOGE' ? 'ltc1...' : 'bc1...'
       })`,
     });
   }
