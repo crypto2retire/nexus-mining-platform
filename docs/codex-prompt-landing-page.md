@@ -317,6 +317,11 @@ Two services, one page: **see the real numbers** (rental data), then
 
 - Do NOT touch: auth, deposits, withdrawals, game, operator pipeline,
   Connect flow, payout trigger, backing monitor, database.
+- **Copy guardrails (SEC posture, Kevin 2026-08-22 — see
+  docs/sec-howeys-analysis.md):** never use the words "passive income,"
+  "returns," "APY," "guaranteed," "investment," "profit-sharing" anywhere on
+  the page. Always frame mining rewards as compensation for the rented
+  hardware's work, never as investment profits.
 - Do NOT change existing SPA behavior — only add the landing page + routes.
 - No new npm dependencies. No fabricated numbers, testimonials, awards, or
   contact info.
