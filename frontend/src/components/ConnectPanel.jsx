@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import RigList from './RigList';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 const WINDOWS = [1, 3, 6, 12, 24, 48, 72];
@@ -56,15 +57,6 @@ function windowsFor(rig) {
   const minimum = Number(rig?.min_hours || 0);
   const maximum = Math.min(Number(rig?.max_hours || 72), 72);
   return WINDOWS.filter((hours) => hours >= minimum && hours <= maximum);
-}
-
-function mineVsBuy(rig, symbol) {
-  const arithmetic = rig?.profitability?.arithmetic;
-  const mined = Number(arithmetic?.cost_per_coin?.[symbol]);
-  const spot = Number(arithmetic?.spot_usd?.[symbol]);
-  const ratio = Number(arithmetic?.mine_vs_buy?.[symbol]);
-  if (!(mined > 0) || !(spot > 0)) return '—';
-  return `Mine ${money(mined, 4)} · Buy ${money(spot, 4)}${Number.isFinite(ratio) ? ` · ${ratio.toFixed(1)}×` : ''}`;
 }
 
 export default function ConnectPanel({ auth }) {
@@ -206,6 +198,28 @@ export default function ConnectPanel({ auth }) {
     requestIdRef.current = '';
   };
 
+  const renderSelectButton = (rig) => (
+    <button
+      type="button"
+      className="rig-action"
+      disabled={!rig.available}
+      onClick={() => selectRig(rig)}
+    >
+      {selectedRigId === String(rig.rig_id) ? 'Selected' : rig.available ? 'Select' : 'Unavailable'}
+    </button>
+  );
+
+  const renderSelectDetail = (rig) => (
+    <button
+      type="button"
+      className="rig-detail-cta"
+      disabled={!rig.available}
+      onClick={() => selectRig(rig)}
+    >
+      {selectedRigId === String(rig.rig_id) ? '✓ Selected — configure below' : rig.available ? 'Choose this miner' : 'Currently unavailable'}
+    </button>
+  );
+
   const submitOrder = async () => {
     if (!quote || !addressValid || ordering) return;
     if (!requestIdRef.current) requestIdRef.current = crypto.randomUUID();
@@ -247,7 +261,7 @@ export default function ConnectPanel({ auth }) {
       <div className="connect-header">
         <div>
           <h2 id="connect-title">Connect My Miner</h2>
-          <p>Choose a real miner and send pool payouts directly to your own wallet.</p>
+          <p>Choose a real miner and send pool payouts directly to your own wallet. Best estimated return is listed first — profit green, loss red; click any miner for the full breakdown.</p>
         </div>
         <span className="connect-direct">Direct to wallet</span>
       </div>
@@ -287,42 +301,15 @@ export default function ConnectPanel({ auth }) {
           {message && <div className="connect-message" role="status">{message}</div>}
 
           {market && !loading && (
-            <div className="connect-table-wrap">
-              <table className="connect-table">
-                <thead>
-                  <tr>
-                    <th>Rig</th><th>Hashrate</th><th>USD/hr</th><th>Net/day</th>
-                    <th>Mine vs Buy</th><th>Break-even</th><th>Min</th><th>RPI</th>
-                    <th>Region</th><th>Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(market.rigs || []).map((rig) => (
-                    <tr key={rig.rig_id} className={selectedRigId === String(rig.rig_id) ? 'selected' : ''}>
-                      <td>{rig.name}</td>
-                      <td>{rig.hashrate_nice || `${Number(rig.hashrate_ghs).toPrecision(4)} GH/s`}</td>
-                      <td>{money(rig.usd_per_hour, 4)}</td>
-                      <td className={Number(rig.profitability?.net_day) >= 0 ? 'connect-positive' : 'connect-negative'}>
-                        {money(rig.profitability?.net_day)}
-                      </td>
-                      <td>{mineVsBuy(rig, coin.symbol)}</td>
-                      <td>{money(rig.profitability?.break_even_price, 4)}</td>
-                      <td>{rig.min_hours}h</td>
-                      <td>{rig.rpi ?? '—'}</td>
-                      <td>{rig.region || '—'}</td>
-                      <td>
-                        <button type="button" disabled={!rig.available} onClick={() => selectRig(rig)}>
-                          {selectedRigId === String(rig.rig_id) ? 'Selected' : rig.available ? 'Select' : 'Unavailable'}
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {(market.rigs || []).length === 0 && (
-                <div className="connect-notice">No eligible, available miners are currently listed.</div>
-              )}
-            </div>
+            <RigList
+              rigs={market.rigs || []}
+              bestValue={market.best_value}
+              algo={coin.algo}
+              primaryCoin={coin.symbol}
+              selectedId={selectedRigId}
+              renderAction={renderSelectButton}
+              detailActions={renderSelectDetail}
+            />
           )}
 
           {selectedRig && (
