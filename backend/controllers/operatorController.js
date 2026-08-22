@@ -226,4 +226,23 @@ async function listOrders(req, res) {
   }
 }
 
-module.exports = { getMarket, createOrder, listOrders, operatorAllowed };
+// Per-miner dashboard for the rigs the operator holds (Kevin 2026-08-22):
+// each rig shows hashrate, estimated payout, time left, current P/L, overall
+// P/L on that miner, and the coin's overall P/L — grouped by coin.
+async function getOperatorMiners(req, res) {
+  if (!operatorAllowed(req, res)) return res;
+  try {
+    const { rows } = await pool.query(
+      'SELECT user_id FROM users WHERE LOWER(wallet_address) = $1',
+      [String(req.auth.wallet).toLowerCase()]
+    );
+    if (rows.length === 0) return res.status(404).json({ error: 'Operator user not found' });
+    const { buildOperatorMiners } = require('../services/minerDashboardService');
+    return res.json(await buildOperatorMiners(rows[0].user_id));
+  } catch (err) {
+    console.error('Operator miners error:', err.message);
+    return res.status(500).json({ error: err.message || 'Unable to load miner dashboard' });
+  }
+}
+
+module.exports = { getMarket, createOrder, listOrders, getOperatorMiners, operatorAllowed };

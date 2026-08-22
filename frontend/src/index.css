@@ -1367,6 +1367,73 @@ button:disabled {
   margin: 0;
 }
 
+/* ============ My Miners (per-rig dashboard, 2026-08-22) ============ */
+.miner-card {
+  padding: 0;
+  overflow: hidden;
+}
+.miner-card summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 0.9rem 1rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.miner-card summary::-webkit-details-marker {
+  display: none;
+}
+.miner-card summary::after {
+  content: '▸';
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+.miner-card[open] summary::after {
+  content: '▾';
+}
+.miner-card-summary h3 {
+  margin: 0 0 0.2rem;
+}
+.miner-card-totals {
+  display: flex;
+  gap: 1.2rem;
+  flex-wrap: wrap;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.miner-card-totals strong {
+  color: var(--text);
+  font-weight: 600;
+}
+.miner-card-totals strong.pnl-pos {
+  color: #2ecc71;
+}
+.miner-card-totals strong.pnl-neg {
+  color: #e74c3c;
+}
+.miner-card .admin-table {
+  border-top: 1px solid var(--border);
+}
+.miner-total-row td {
+  border-top: 2px solid var(--border);
+  font-weight: 700;
+}
+.miner-total-row td.pnl-pos,
+.admin-table td.pnl-pos {
+  color: #2ecc71;
+}
+.miner-total-row td.pnl-neg,
+.admin-table td.pnl-neg {
+  color: #e74c3c;
+}
+.admin-note {
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-style: italic;
+}
+
 /* ============ Direct-to-wallet Connect ============ */
 .app-nav {
   display: flex;

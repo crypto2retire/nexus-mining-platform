@@ -5,7 +5,7 @@ const { handleRewardWebhook } = require('../services/rewardDistributor');
 const { getRewards, claimRewards, withdrawRewards, listWithdrawals, markWithdrawalPaid, rejectWithdrawal } = require('../controllers/rewardsController');
 const { getAdminStats } = require('../controllers/adminStatsController');
 const { getState, claimStreak, createReferralLink, applyReferralCode } = require('../controllers/gameController');
-const { getMarket, createOrder, listOrders } = require('../controllers/operatorController');
+const { getMarket, createOrder, listOrders, getOperatorMiners } = require('../controllers/operatorController');
 const { createChallenge, verifySignature } = require('../services/authService');
 const { requireAuth } = require('../middleware/auth');
 const {
@@ -48,6 +48,8 @@ router.get('/connect/orders', requireAuth, listConnectOrders);
 router.get('/operator/market', requireAuth, getMarket);
 router.post('/operator/order', requireAuth, createOrder);
 router.get('/operator/orders', requireAuth, listOrders);
+// Per-miner dashboard for the rigs the operator holds (2026-08-22).
+router.get('/operator/miners', requireAuth, getOperatorMiners);
 router.post('/rigs/upgrade', requireAuth, upgradeRig);
 // HYBRID: short hashrate sessions drawn from the room's spare capacity.
 router.post('/rigs/session', requireAuth, buySession);
