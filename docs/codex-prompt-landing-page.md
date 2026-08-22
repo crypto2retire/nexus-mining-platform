@@ -9,11 +9,27 @@
 
 ## Purpose (Kevin 2026-08-22)
 
-A public landing page for Nexus: describes the app, has strong SEO, and
+A public landing page for [BRAND]: describes the app, has strong SEO, and
 explains why renting miners can be better than buying. **Copy rules (Kevin's
 standing rules, non-negotiable): no promises, no expectations, no fake
 stories, no fabricated numbers, no superlatives ("best"/"only").** Only the
 reasons below — they are the real reasons from the product history.
+
+**Positioning (Kevin 2026-08-22, non-negotiable):** [BRAND] is NOT a
+"rent my miner" service — nobody is renting a miner from us. Two services:
+
+1. **Renter-first data.** [BRAND] shows realistic returns for people who
+   want to RENT mining capacity. Everyone else (WhatToMine-style
+   calculators, rig marketplaces, hardware sites) builds for buyers/owners —
+   their data is not helpful to renters. We show what renting actually
+   costs, what it realistically returns, and whether it beats buying the
+   coin — before anyone spends a dollar.
+2. **Easy self-custody connect.** Pick a coin, pick a pool (by returns,
+   size, or rental length), and [BRAND] rents the rig and points it at your
+   wallet. The pool pays you directly.
+
+Every copy reference to the product below uses [BRAND] — replace with the
+final name when chosen.
 
 ## Architecture
 
@@ -28,8 +44,8 @@ reasons below — they are the real reasons from the product history.
   - All `/api/*` routes unchanged.
   - The SPA's assets (dist/assets/*) must still load — keep the same static
     middleware, mounted so both pages can use it.
-- Add a simple in-page anchor nav (no routing library): Why rent / Why mine
-  / Taxes / Who it's for / How it works / Get Bitcoin / FAQ.
+- Add a simple in-page anchor nav (no routing library): Why rent / Renter
+  data / Why mine / Taxes / Who it's for / How it works / Get Bitcoin / FAQ.
 - Match the existing dark theme (use the SPA's CSS variables as inspiration:
   #0b0d12 bg, #141820 surface, #22d3ee accent — but self-contained CSS in the
   landing page; do NOT import the SPA bundle).
@@ -39,10 +55,10 @@ reasons below — they are the real reasons from the product history.
 ### <title> + meta
 
 ```html
-<title>Nexus — Rent Real Mining Hashrate, Paid Directly to Your Wallet</title>
-<meta name="description" content="Rent real mining hashrate for as little as a few dollars. No hardware, no pool setup — Nexus connects a real miner to your wallet and the pool pays you directly. Start with Bitcoin." />
+<title>[BRAND] — Rent Mining Capacity with Realistic Returns</title>
+<meta name="description" content="Rent real mining hashrate for as little as a few dollars. See realistic returns before you rent, then [BRAND] connects the rig to your wallet and the pool pays you directly. Start with Bitcoin." />
 <meta name="robots" content="index,follow" />
-<link rel="canonical" href="https://nexusmining.app/" /> <!-- adjust to the real domain when known -->
+<link rel="canonical" href="https://[BRAND-DOMAIN]/" /> <!-- adjust to the real domain when known -->
 ```
 
 Open Graph (og:title, og:description, og:type=website) + Twitter card tags mirroring
@@ -50,11 +66,13 @@ the title/description.
 
 ### Hero
 
-- H1: **Rent mining hashrate. Get paid straight to your wallet.**
-- Sub: Nexus finds a real miner to rent, connects it to a properly configured
-  pool, and points it at your payout address. No hardware to buy. No pool
-  accounts to open. No middleman holding your mined coins.
-- Primary CTA button: **See live miners** (anchor to #how-it-works)
+- H1: **Rent mining capacity. See the real returns first.**
+- Sub: Most mining data is built for people who buy hardware. [BRAND] is
+  built for people who rent: realistic returns on rented hashrate, then we
+  rent the rig, connect it to a properly configured pool, and point it at
+  your payout address. No hardware to buy. No pool accounts to open. No
+  middleman holding your mined coins.
+- Primary CTA button: **See live miners** (anchor to #renter-data)
 - Secondary CTA: **How to get Bitcoin** (anchor to #get-bitcoin)
 
 ### Section: Why rent instead of buy (#why-rent)
@@ -94,6 +112,27 @@ Second honest note (must appear, word-for-word intent):
 > headline returns and then subtract electricity and maintenance costs from
 > what you actually receive. With a rental, those costs are already included
 > in the price — the pool pays your wallet in full.
+
+### Section: Data for renters, not buyers (#renter-data)
+
+Intro: Almost every mining calculator and marketplace is built for people
+who own (or want to own) hardware. Renting is different — and the numbers
+renters need are different.
+
+- **Buyer tools assume you own the rig.** WhatToMine-style calculators ask
+  "how much does your hardware earn?" They do not tell you what it costs to
+  rent that hashrate for a day, or what is left after the rental.
+- **Marketplaces show listings, not outcomes.** Rig rental sites show you
+  rigs and prices — not realistic returns for a rental window, and not
+  whether renting even beats buying the coin.
+- **[BRAND] shows what renters actually need:** live rental prices across
+  the marketplace, expected production for the rental window, net after
+  the rental cost, break-even coin price, and Mine vs Buy — before you
+  spend anything.
+- **The data is honest by design.** If mining the coin right now costs more
+  than buying it, the page says so. No headline APY, no subtracted
+  electricity or maintenance fees later — the rental price includes them,
+  and what the pool pays is what you get.
 
 ### Section: Why mine instead of buy-and-hold (#why-mine)
 
@@ -150,23 +189,27 @@ reasons people mine this way):
   watch real payouts land in your wallet, then decide whether bigger makes
   sense.
 - **Overwhelmed by miner + pool + wallet setup?** Picking a miner, picking a
-  pool, and connecting the two is the hardest part of mining. RentMyMiner
-  does all three for you.
+  pool, and connecting the two is the hardest part of mining. [BRAND] does
+  all three for you.
 
 ### Section: How it works (#how-it-works)
 
-1. **Get some Bitcoin.** The rental marketplace Nexus uses
+Two services, one page: **see the real numbers** (rental data), then
+**connect a rig to your wallet** (self-custody setup).
+
+1. **Get some Bitcoin.** The rental marketplace [BRAND] uses
    (MiningRigRentals) requires BTC to fund rentals. Venmo, CashApp, or
    Phantom are the easiest ways to buy it (see the next section).
-2. **Pick a miner to rent.** See live rigs with real numbers: hashrate,
-   cost per day, net profit/loss at current prices, break-even price, and
-   mine-vs-buy.
-3. **We connect it — to your wallet.** Nexus rents the rig and points it at
-   a properly configured, wallet-only pool (Kaspa on HeroMiners, Zcash on
-   2Miners, Bitcoin on Ocean). Your payout address is the worker. Nexus
-   charges a flat 5% connection fee.
+2. **Choose a coin, choose a pool.** Pick what you want to mine, then sort
+   pools by returns, pool size, or rental length. See the live numbers
+   before you commit: hashrate, cost per day, net profit/loss at current
+   prices, break-even price, and mine-vs-buy.
+3. **We rent and connect it — to your wallet.** [BRAND] rents the rig and
+   points it at a properly configured, wallet-only pool (Kaspa on
+   HeroMiners, Zcash on 2Miners, Bitcoin on Ocean). Your payout address is
+   the worker. [BRAND] charges a flat 5% connection fee.
 4. **The pool pays you directly.** When your mining crosses the pool's
-   payout floor, the pool sends the coins straight to your wallet. Nexus
+   payout floor, the pool sends the coins straight to your wallet. [BRAND]
    never holds them.
 
 ### Section: How to get Bitcoin (#get-bitcoin)
@@ -174,7 +217,7 @@ reasons people mine this way):
 - **Phantom** — buy Bitcoin with Apple Pay or Google Pay (identity
   verification required). The easiest option if you are starting from zero.
 - **Venmo or CashApp** — buy Bitcoin there, then transfer it to Phantom,
-  Rabby, or Trust Wallet — the wallets you connect to Nexus and receive
+  Rabby, or Trust Wallet — the wallets you connect to [BRAND] and receive
   payouts in.
 - Your BTC funds the rental on MiningRigRentals; mined coins land in the
   payout wallet you provide.
@@ -189,14 +232,14 @@ reasons people mine this way):
 
 ### FAQ (#faq) — visible + FAQPage JSON-LD (same Q&A in both)
 
-1. **Do I need to buy a mining machine?** No. Nexus rents real hashrate for
+1. **Do I need to buy a mining machine?** No. [BRAND] rents real hashrate for
    fixed windows (as short as a day) on MiningRigRentals. You never own or
    maintain hardware.
 2. **Where do my mined coins go?** Directly to the payout address you
-   provide. Nexus uses wallet-only pools (Kaspa/HeroMiners, Zcash/2Miners,
+   provide. [BRAND] uses wallet-only pools (Kaspa/HeroMiners, Zcash/2Miners,
    Bitcoin/Ocean), and the pool sends your coins to your wallet when they
    cross the payout floor.
-3. **Why do I pay with Bitcoin?** The rental marketplace Nexus uses funds
+3. **Why do I pay with Bitcoin?** The rental marketplace [BRAND] uses funds
    rentals in BTC. Buy it with Venmo, CashApp, or Phantom, or transfer it
    from an exchange into Phantom, Rabby, or Trust Wallet.
 4. **What can I mine?** Kaspa, Zcash, and Bitcoin through the self-custody
@@ -222,13 +265,18 @@ reasons people mine this way):
     the rental price, and the pool pays your wallet in full. Some platforms
     advertise high returns and then deduct electricity and maintenance from
     what you receive; with a rental, what you see is what you get.
+11. **Are you a rig rental marketplace? Do you rent out my miner?** No.
+    [BRAND] does not rent out anyone's miner and does not own the rigs.
+    Rentals happen on MiningRigRentals between you and rig hosts. [BRAND]
+    provides the renter-first data to choose well, and the connection
+    service that sets the rental up and points it at your wallet.
 
 ### Footer
 
-- Product: Nexus Mining Engine. Virtual cloud-mining accounting layer; no
-  native token; 5% connection fee.
-- Links: Why rent / Why mine / Taxes / Who it's for / How it works / Get
-  Bitcoin / FAQ (same-page anchors).
+- Product: [BRAND] Mining Engine. Renter-first mining data + self-custody
+  rental connection; no native token; 5% connection fee.
+- Links: Why rent / Renter data / Why mine / Taxes / Who it's for / How it
+  works / Get Bitcoin / FAQ (same-page anchors).
 - Honest line: "Cryptocurrency mining is risky and may lose money. Nothing
   on this page is financial advice or a promise of returns."
 - Domain placeholder comment for the canonical URL.
@@ -236,12 +284,13 @@ reasons people mine this way):
 ## SEO requirements
 
 - One H1 per page, natural keyword phrasing (no stuffing): "rent mining
-  hashrate", "rent bitcoin miner", "hashrate rental", "mine without buying
-  hardware", "self-custody mining", "Kaspa/Zcash/Bitcoin mining rental",
-  "cloud mining alternative", "paid directly to your wallet", "mine instead
-  of buy", "crypto mining tax advantages".
+  hashrate", "rent bitcoin miner", "hashrate rental", "rent mining
+  capacity", "realistic mining returns", "mining rental calculator", "mine
+  without buying hardware", "self-custody mining", "Kaspa/Zcash/Bitcoin
+  mining rental", "cloud mining alternative", "paid directly to your
+  wallet", "mine instead of buy", "crypto mining tax advantages".
 - FAQPage JSON-LD schema (same Q&A text as the visible FAQ).
-- Organization + WebSite JSON-LD (name Nexus Mining Engine, no invented
+- Organization + WebSite JSON-LD (name [BRAND] Mining Engine, no invented
   addresses/phone numbers — omit contact info entirely rather than fake it).
 - Semantic HTML5 (header/main/section/footer, h1-h3 hierarchy).
 - Responsive: same standards as the app (works on phones/tablets/desktop;
