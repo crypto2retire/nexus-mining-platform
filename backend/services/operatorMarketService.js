@@ -204,7 +204,7 @@ function bestReason(rig, config, spots) {
     : `break-even $${breakEven.toFixed(4)}${delta === null ? '' : ` — ${delta.toFixed(1)}% ${direction} spot`}`;
   const rpi = String(rig.rpi ?? '').trim();
   const rpiNote = /^new$/i.test(rpi) || !(Number(rpi) >= 90)
-    ? ' — unrated/low-track-record rig on MRR (no track record yet)'
+    ? ' — unrated rig on MRR (no track record yet)'
     : '';
   return `≈ ${netText} net at current ${config.primaryCoin} price (${breakEvenText})${rpiNote}`;
 }
