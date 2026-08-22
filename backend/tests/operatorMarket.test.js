@@ -78,9 +78,31 @@ test('BTC profitability uses the verified 500 TH/s production anchor', () => {
   expect(result.revenue_day).toBeCloseTo(20.96, 12);
   expect(result.cost_day).toBe(24);
   expect(result.net_day).toBeCloseTo(-3.04, 12);
+  // Mine-vs-buy: $24/day ÷ 0.000262 BTC/day ≈ $91,603 to mine 1 BTC vs
+  // $80,000 to buy → 1.145× (mining costs 14.5% more than buying).
+  expect(result.arithmetic.cost_per_coin.BTC).toBeCloseTo(24 / 0.000262, 2);
+  expect(result.arithmetic.mine_vs_buy.BTC).toBeCloseTo((24 / 0.000262) / 80000, 4);
+  expect(result.arithmetic.cost_per_dollar_mined).toBeCloseTo(24 / 20.96, 4);
   expect(storageHashrateFor('sha256', {
     hashrate: { advertised: { hash: 500, type: 'th' } },
   })).toBe(500);
+});
+
+test('merged LTC+DOGE reports per-coin mine cost and the universal spend ratio', () => {
+  const result = calculateProfitability({
+    algo: 'scrypt',
+    hashrateGhs: 7,
+    usdPerHour: 0.16, // $3.84/day rental
+    minHours: 24,
+    spots: { LTC: 53.16, DOGE: 0.0911 },
+  });
+  expect(result.arithmetic.production_day.LTC).toBeCloseTo(0.007304, 12);
+  expect(result.arithmetic.production_day.DOGE).toBeCloseTo(28.69, 6);
+  expect(result.arithmetic.cost_per_coin.LTC).toBeCloseTo(3.84 / 0.007304, 2);
+  expect(result.arithmetic.cost_per_coin.DOGE).toBeCloseTo(3.84 / 28.69, 4);
+  expect(result.arithmetic.mine_vs_buy.LTC).toBeCloseTo((3.84 / 0.007304) / 53.16, 4);
+  const minedValue = 0.007304 * 53.16 + 28.69 * 0.0911;
+  expect(result.arithmetic.cost_per_dollar_mined).toBeCloseTo(3.84 / minedValue, 4);
 });
 
 test('market ranking filters junk, prefers verified available rigs, and sorts table by net day', () => {

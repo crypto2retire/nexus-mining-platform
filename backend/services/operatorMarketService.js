@@ -125,6 +125,21 @@ function calculateProfitability({ algo, hashrateGhs, usdPerHour, minHours, spots
   }
   const costDay = Number(usdPerHour) * 24;
   const ratio = revenueDay > 0 ? costDay / revenueDay : null;
+  // Mine-vs-buy (Kevin 2026-08-22): expected USD cost to mine ONE unit of
+  // each coin, compared against its live market price — the plainest possible
+  // "is mining cheaper than buying?" answer. cost_per_dollar_mined is the
+  // universal ratio (spend $X to mine $1 of coins) — correct for merged
+  // pools (LTC+DOGE) where per-coin cost alone would overstate.
+  const costPerCoin = {};
+  const mineVsBuy = {};
+  for (const [symbol, production] of Object.entries(productionDay)) {
+    const perCoin = production > 0 ? costDay / production : null;
+    costPerCoin[symbol] = perCoin;
+    const spot = Number(spots?.[symbol]);
+    mineVsBuy[symbol] =
+      perCoin != null && Number.isFinite(spot) && spot > 0 ? perCoin / spot : null;
+  }
+  const costPerDollarMined = revenueDay > 0 ? costDay / revenueDay : null;
   const breakEvenPrices = Object.fromEntries(Object.keys(config.coins).map((symbol) => [
     symbol,
     ratio === null ? null : Number(spots[symbol]) * ratio,
@@ -167,6 +182,10 @@ function calculateProfitability({ algo, hashrateGhs, usdPerHour, minHours, spots
       revenue_day: revenueDay,
       cost_day: costDay,
       net_day: revenueDay - costDay,
+      cost_per_coin: costPerCoin,
+      mine_vs_buy: mineVsBuy,
+      mined_value_day: revenueDay,
+      cost_per_dollar_mined: costPerDollarMined,
     },
   };
 }

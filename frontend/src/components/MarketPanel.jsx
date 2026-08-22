@@ -9,6 +9,9 @@ const ALGOS = [
   { id: 'sha256', label: 'BTC' },
 ];
 
+// Primary mined coin per algo tab — used by the Mine vs Buy column.
+const ALGO_COIN = { kheavyhash: 'KAS', scrypt: 'LTC', equihash: 'ZEC', sha256: 'BTC' };
+
 async function responseBody(response, fallback) {
   let body;
   try {
@@ -79,13 +82,22 @@ export default function MarketPanel({ auth }) {
   }), [auth.token]);
 
   // Column definitions: key -> { label, accessor, defaultDir }
-  const COLUMNS = {
+  const COLUMNS = useMemo(() => ({
     name: { label: 'Rig', accessor: (r) => String(r.name || '').toLowerCase(), defaultDir: 'asc' },
     hashrate: { label: 'Hashrate', accessor: (r) => Number(r.hashrate_ghs) || 0, defaultDir: 'desc' },
     usd_per_hour: { label: 'USD/hr', accessor: (r) => Number(r.usd_per_hour) || 0, defaultDir: 'asc' },
     usd_per_day: { label: 'Cost/day', accessor: (r) => Number(r.usd_per_day) || 0, defaultDir: 'asc' },
     usd_min_rental: { label: 'Min rent', accessor: (r) => Number(r.usd_min_rental) || 0, defaultDir: 'asc' },
     net_day: { label: 'Net/day', accessor: (r) => Number(r.profitability?.net_day) || 0, defaultDir: 'desc' },
+    mine_vs_buy: {
+      label: 'Mine vs Buy',
+      accessor: (r) => {
+        const m = r.profitability?.arithmetic;
+        if (algo === 'scrypt' || !m) return Number(m?.cost_per_dollar_mined) || Number.POSITIVE_INFINITY;
+        return Number(m?.mine_vs_buy?.[ALGO_COIN[algo]]) || Number.POSITIVE_INFINITY;
+      },
+      defaultDir: 'asc',
+    },
     break_even: { label: 'Break-even', accessor: (r) => {
         const v = Number(r.profitability?.break_even_price);
         return Number.isFinite(v) && v > 0 ? v : Number.POSITIVE_INFINITY;
@@ -93,7 +105,7 @@ export default function MarketPanel({ auth }) {
     min_hours: { label: 'Min', accessor: (r) => Number(r.min_hours) || 0, defaultDir: 'asc' },
     rpi: { label: 'RPI', accessor: (r) => Number(r.rpi) || 0, defaultDir: 'desc' },
     region: { label: 'Region', accessor: (r) => String(r.region || '').toLowerCase(), defaultDir: 'asc' },
-  };
+  }), [algo]);
 
   const sortedRigs = useMemo(() => {
     const col = COLUMNS[sortKey] || COLUMNS.net_day;
@@ -227,6 +239,33 @@ export default function MarketPanel({ auth }) {
     }
   };
 
+  const renderMineVsBuy = (rig) => {
+    const m = rig.profitability?.arithmetic;
+    if (!m) return '—';
+    if (algo === 'scrypt') {
+      // Merged LTC+DOGE: per-coin cost alone would overstate, so show the
+      // universal ratio — dollars of rental spent per $1 of mined value.
+      const spend = Number(m.cost_per_dollar_mined);
+      if (!Number.isFinite(spend) || spend <= 0) return '—';
+      return (
+        <span className={`mine-vs-buy ${spend < 1 ? 'mine-vs-buy--good' : 'mine-vs-buy--bad'}`}>
+          Spend {money(spend)} / $1 mined
+        </span>
+      );
+    }
+    const coin = ALGO_COIN[algo];
+    const perCoin = Number(m.cost_per_coin?.[coin]);
+    const spot = Number(m.spot_usd?.[coin]);
+    const ratio = Number(m.mine_vs_buy?.[coin]);
+    if (!Number.isFinite(perCoin) || perCoin <= 0 || !Number.isFinite(spot) || spot <= 0) return '—';
+    return (
+      <span className={`mine-vs-buy ${Number.isFinite(ratio) && ratio < 1 ? 'mine-vs-buy--good' : 'mine-vs-buy--bad'}`}>
+        Mine {money(perCoin, 4)} · Buy {money(spot, 4)}
+        {Number.isFinite(ratio) ? ` · ${ratio.toFixed(1)}×` : ''}
+      </span>
+    );
+  };
+
   return (
     <section className="market-panel" aria-labelledby="market-panel-title">
       <div className="market-panel__header">
@@ -327,6 +366,7 @@ export default function MarketPanel({ auth }) {
                       <td>{money(rig.usd_per_day)}</td>
                       <td>{money(rig.usd_min_rental, 4)}</td>
                       <td className={net >= 0 ? 'market-positive' : 'market-negative'}>{signedMoney(net)}</td>
+                      <td>{renderMineVsBuy(rig)}</td>
                       <td>{money(rig.profitability?.break_even_price, 4)}</td>
                       <td>{rig.min_hours}h</td>
                       <td>{rig.rpi ?? '—'}</td>
@@ -345,7 +385,7 @@ export default function MarketPanel({ auth }) {
                     </tr>,
                     open && (
                       <tr className="market-scenarios" key={`${rig.rig_id}-scenarios`}>
-                        <td colSpan="12">
+                        <td colSpan="13">
                           <p>{arithmeticText(rig)}</p>
                           <div className="market-scenario-grid">
                             <span>−25% <strong>{signedMoney(rig.profitability.net_minus25)}</strong></span>
