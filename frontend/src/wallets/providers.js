@@ -19,11 +19,14 @@ if (typeof window !== 'undefined') {
   window.dispatchEvent(new Event('eip6963:requestProvider'));
 }
 
+// Order matters: check OWN-BRAND flags before COMPAT flags. Trust Wallet's
+// provider carries isRabby/isMetaMask compatibility flags alongside its own
+// isTrust — if isRabby is checked first, Trust gets labeled "Rabby Wallet 2".
 const WALLET_IDENTITIES = [
-  { matches: (provider) => provider.isRabby, id: 'rabby', name: 'Rabby Wallet', icon: 'R' },
   { matches: (provider) => provider.isTrust, id: 'trust', name: 'Trust Wallet', icon: 'T' },
-  { matches: (provider) => provider.isCoinbaseWallet, id: 'coinbase', name: 'Coinbase Wallet', icon: 'C' },
   { matches: (provider) => provider.isPhantom, id: 'phantom', name: 'Phantom', icon: 'P' },
+  { matches: (provider) => provider.isCoinbaseWallet, id: 'coinbase', name: 'Coinbase Wallet', icon: 'C' },
+  { matches: (provider) => provider.isRabby, id: 'rabby', name: 'Rabby Wallet', icon: 'R' },
   { matches: (provider) => provider.isMetaMask, id: 'metamask', name: 'MetaMask', icon: 'M' },
 ];
 
