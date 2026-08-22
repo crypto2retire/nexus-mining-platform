@@ -30,7 +30,10 @@ and market facts below were verified live 2026-08-22.
 - **Pool: Ocean (ocean.xyz)** — wallet-only by design ("No KYC, only payout
   address"), payouts auto-send above **0.00065536 BTC** (verified on their
   homepage), pays the Bitcoin address directly, no account. Stratum
-  `ocean.xyz:3333`, username = the platform BTC address, pass `x`.
+  `ocean.xyz:3333`, username = the platform BTC address, pass `x`. Platform
+  BTC wallet (provided by Kevin 2026-08-22):
+  `bc1qfclp7n4nqf980fq77rq6euha8ft8q92cysqlgg` (valid bech32 P2WPKH —
+  checksum-verified).
   **2Miners BTC is OUT** (min payout 0.05 BTC ≈ $3,900 — the old 50-KAS
   never-pays trap).
 - **Watch design**: BTC uses the **LTC/DOGE pattern** — Blockcypher on-chain
@@ -134,13 +137,15 @@ differ; `DROP CONSTRAINT IF EXISTS` + recreate with the 5-value ARRAY.)
   MRR profile (operator does that), do NOT restart anything. Report the
   remaining XMR references if any are found outside the allowed set.
 
-## Operator step (paste-ready for Kevin — the ONE thing he must supply)
+## Operator step (address ALREADY provided — Kevin supplied it 2026-08-22)
 
-Provide a **Bitcoin address** (e.g. from Trust Wallet — BTC account) for the
-platform BTC wallet. It becomes `MRR_PLATFORM_WALLET_BTC`, the Ocean pool
-username (payout destination), and the Blockcypher watch target. After
-review, the operator: applies migration 025, sets the env vars, creates the
-MRR SHA-256 pool profile via API (`PUT /account/profile` + `PUT
-/account/profile/{id}` with `ocean.xyz:3333`, user = BTC address, pass x),
-sets `MRR_POOL_PROFILE_SHA256=<id>`, deletes `payout_watch` rows for XMR,
-rebuilds the frontend, restarts.
+Platform BTC wallet = **`bc1qfclp7n4nqf980fq77rq6euha8ft8q92cysqlgg`**
+(Trust Wallet BTC, valid bech32 P2WPKH). It becomes `MRR_PLATFORM_WALLET_BTC`,
+the Ocean pool username (payout destination), and the Blockcypher watch
+target. After review, the operator: applies migration 025, sets the env vars
+(`MRR_PLATFORM_WALLET_BTC=bc1qfclp7n4nqf980fq77rq6euha8ft8q92cysqlgg`),
+creates the MRR SHA-256 pool profile via API (`PUT /account/profile` + `PUT
+/account/profile/{id}` with `ocean.xyz:3333`, user =
+`bc1qfclp7n4nqf980fq77rq6euha8ft8q92cysqlgg`, pass x), sets
+`MRR_POOL_PROFILE_SHA256=<id>`, deletes `payout_watch` rows for XMR, rebuilds
+the frontend, restarts.
