@@ -28,8 +28,10 @@ for them, and never hold their coins. Two services:
    costs, what it realistically returns, and whether it beats buying the
    coin — before anyone spends a dollar.
 2. **Easy self-custody connect.** Pick a coin, pick a pool (by returns,
-   size, or rental length), and [BRAND] rents the rig on MiningRigRentals
-   and points it at the user's wallet. The pool pays the user directly.
+   size, or rental length), and [BRAND] finds the right rig and sets up the
+   pool correctly. **The user pays the miner directly** — the full rental
+   amount goes to the rig; the pool pays the user directly; [BRAND]'s 5%
+   connection fee is added on top, separate from the rental.
 
 **Why this model matters (the trust story):** centralized cloud mining apps
 (ECOS, KuMining, Wattum — the traditional model) take your money, control
@@ -217,10 +219,11 @@ Two services, one page: **see the real numbers** (rental data), then
    pools by returns, pool size, or rental length. See the live numbers
    before you commit: hashrate, cost per day, net profit/loss at current
    prices, break-even price, and mine-vs-buy.
-3. **We rent and connect it — to your wallet.** [BRAND] rents the rig and
-   points it at a properly configured, wallet-only pool (Kaspa on
+3. **You pay the miner directly — we set it up.** [BRAND] finds the right
+   rig and points it at a properly configured, wallet-only pool (Kaspa on
    HeroMiners, Zcash on 2Miners, Bitcoin on Ocean). Your payout address is
-   the worker. [BRAND] charges a flat 5% connection fee.
+   the worker. Your rental payment goes to the miner in full; [BRAND]'s 5%
+   connection fee is added on top, separate from the rental.
 4. **The pool pays you directly.** When your mining crosses the pool's
    payout floor, the pool sends the coins straight to your wallet. [BRAND]
    never holds them.
@@ -257,9 +260,10 @@ Two services, one page: **see the real numbers** (rental data), then
    from an exchange into Phantom, Rabby, or Trust Wallet.
 4. **What can I mine?** Kaspa, Zcash, and Bitcoin through the self-custody
    connect flow, plus Litecoin/Dogecoin through the platform's own mining.
-5. **What is the 5% fee?** A flat connection fee for finding the miner,
-   setting up the rental, and pointing it at a correctly configured pool.
-   The mined coins themselves go to you in full.
+5. **What is the 5% fee?** A flat connection fee for finding the right
+   miner and pointing it at a correctly configured pool. It is added on top
+   of the rental — never taken out of it — and the mined coins go to you in
+   full.
 6. **Is this cloud mining?** No — it is the opposite. Traditional cloud
    mining apps (ECOS, KuMining, Wattum) are centralized: you pay them, they
    control the hardware, the pool, and the wallet, and they pay you from
