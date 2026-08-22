@@ -65,8 +65,12 @@ sense for most people starting out. Here is why.
 - **No thousands of dollars upfront.** Mining ASICs cost real money — top
   machines run into the thousands. Renting starts at a few dollars for a day
   of hashrate.
-- **No power, heat, or noise.** Rented rigs run in the host's facility. You
-  never deal with electricity costs, cooling, or fan noise.
+- **Electricity and maintenance are included in the price.** Rented rigs run
+  in the host's facility — the host pays the power bill, and the host fixes
+  broken rigs. What the pool pays you is what you get, with nothing
+  deducted after the fact.
+- **No power, heat, or noise.** You never deal with electricity costs,
+  cooling, or fan noise.
 - **No maintenance.** Rigs break, firmware needs updating, and ASICs lose
   value as network difficulty rises. With a rental, the window ends and
   you're done.
@@ -83,6 +87,13 @@ Honest counterbalance (must appear, word-for-word intent):
 > costs MORE than simply buying them. We show you that number on every rig
 > ("Mine vs Buy"). We would rather you see the real math than promise a
 > profit that is not there.
+
+Second honest note (must appear, word-for-word intent):
+
+> The price you see is the price you pay. Some platforms advertise high
+> headline returns and then subtract electricity and maintenance costs from
+> what you actually receive. With a rental, those costs are already included
+> in the price — the pool pays your wallet in full.
 
 ### Section: Why mine instead of buy-and-hold (#why-mine)
 
@@ -207,6 +218,10 @@ reasons people mine this way):
 9. **Is mining or buying cheaper right now?** At current market prices,
    mining most coins costs more than buying them. We show the exact
    mine-vs-buy number on every rig so you can decide for yourself.
+10. **Are electricity and maintenance included?** Yes — both are already in
+    the rental price, and the pool pays your wallet in full. Some platforms
+    advertise high returns and then deduct electricity and maintenance from
+    what you receive; with a rental, what you see is what you get.
 
 ### Footer
 
