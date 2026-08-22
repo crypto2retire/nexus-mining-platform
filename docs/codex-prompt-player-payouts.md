@@ -23,11 +23,15 @@ already returns per-room data. ADD a `payout_history` array to its response:
 - Source of truth: `user_rewards_ledger` (per-user payout rows written by
   `backend/services/rewardDistributor.js` — user_id, payout_id,
   calculated_reward_1, calculated_reward_2, protocol_fee_taken, status
-  (UNCLAIMED/CLAIMED), created_at if the column exists — check the migration
-  files 001-005 for the exact columns; use what is actually there).
+  (UNCLAIMED/CLAIMED), **`updated_at`** — verified 2026-08-22 against the
+  live schema: this table has `updated_at`, NOT `created_at`).
 - Query: last 20 rows for the wallet's user_id, joined to
-  `real_pool_payouts` (via payout_id) for the room/pool name
-  (`target_pool`), coin symbol, and paid_at. Order by most recent.
+  `real_pool_payouts` (via payout_id) for the room/pool name (`target_pool`)
+  and coin symbol. **Date rule (Codex-verified 2026-08-22): use
+  `real_pool_payouts.payout_timestamp` as the mining-row date (the actual
+  pool payment/accrual time — `paid_at` does not exist), fall back to
+  `user_rewards_ledger.updated_at` when payout_id is NULL.** Order by that
+  date DESC, most recent first.
 - ALSO include the user's game rewards: `game_rewards_ledger`
   (reason STREAK / REFERRAL_BONUS, amount_usdc, created_at) — these are
   USDC-denominated; include them in the same list with `kind: 'game'` vs
