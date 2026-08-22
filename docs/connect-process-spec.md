@@ -52,5 +52,66 @@ directly" therefore means one of:
   its own line item. Not literally "user→miner" on-chain, but the accounting
   is fully separated.
 
-**Decision needed from Kevin: A or B** (or a hybrid: B now, A later when
-MRR API-key onboarding is productized).
+## Decision: Option B — CONFIRMED (Kevin 2026-08-22)
+
+**Chosen:** Option B — user sends the amount needed to pay the miner; a
+smart contract forwards it to fund the MRR rental. **Rejected:** Option A —
+API access to a user's MRR account gives us access to their account and
+funds (draining risk); with Option B we have **no access to user funds or
+wallets at any time**.
+
+### Why B is legally stronger (analysis Kevin reviewed, 2026-08-22)
+- **FinCEN four-factor test (2019 guidance)** — money-transmitter factors
+  all land favorable for B: the user owns the value; it is stored
+  user-wallet → contract → MRR (we never hold it); the user initiates; the
+  contract executes the transfer (no total independent control by us).
+  Unhosted-wallet reasoning applies: the owner interacts with the payment
+  system directly.
+- **Software provider vs service:** "accepting value and transmitting it"
+  = money transmitter; "merely supplying tools" = software provider. B is a
+  tool the user drives.
+- **The control test (Coin Center / Tornado Cash):** if we can move funds
+  locked by the contract → money transmitter. If nobody can (logic-only,
+  no admin withdraw) → software provider. **Design requirement: the funding
+  contract MUST be non-custodial — no admin key that can move funds; only
+  the intended forward/settle/refund logic.**
+- **SEC "vaults" caveat:** even if not a money transmitter, the SEC may
+  examine a contract+facilitation model. Bring the contract design to
+  Monday's counsel.
+
+### ⚠️ Technical reality (verified against MRR, 2026-08-22)
+MRR funding is **BTC-only, via the account's Bitcoin deposit address**. An
+EVM smart contract **cannot send BTC** — so "the contract forwards it to
+MRR" is not directly executable on-chain. The contract CAN hold and forward
+**USDC (Base)**; getting USDC to MRR requires a conversion step. Realistic
+architectures (pick in order of preference):
+
+1. **BTC direct + contract for fee/escrow (recommended):** user sends BTC
+   straight from their wallet to the MRR funding address (we show the exact
+   address + amount; we never touch it). The smart contract (Base, USDC)
+   handles the **5% fee as a separate payment** + optional escrow/refund
+   guarantee for the rental. Closest to "user pays miner directly, fee
+   added and separate," zero custody.
+2. **USDC escrow contract + keeper conversion:** user deposits USDC (rental
+   + fee) into the contract; a keeper converts the rental portion to BTC
+   and forwards to MRR. Contract holds funds programmatically (non-
+   custodial by design), but the keeper is a human moment — weakens the
+   "we never touch funds" story and the FinCEN factors.
+3. **User-guided rental (no automation):** we tell the user exactly which
+   rig + pool config to rent on MRR's own web UI with THEIR account; they
+   pay from their own MRR balance. True direct payment, zero access, but
+   the rental is not automated by our worker.
+
+**Recommendation: architecture 1** — user BTC → MRR directly (no contract
+needed for the rental itself), smart contract only for the separate 5% fee
+(+ optional escrow). Confirm with Kevin before building the contract.
+
+### Next steps
+- [ ] Kevin confirms architecture 1 vs 2 vs 3
+- [ ] Counsel reviews the non-custodial contract design (Monday)
+- [ ] Contract spec: no admin withdraw; forward/settle/refund only;
+      upgradeability via timelock at most
+- [ ] Pool-choice UX (returns/size/cost/length) still to be built
+- [ ] Connect funding path migration (out of scope until architecture set)
+
+
