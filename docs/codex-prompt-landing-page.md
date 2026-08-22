@@ -29,7 +29,7 @@ reasons below — they are the real reasons from the product history.
   - The SPA's assets (dist/assets/*) must still load — keep the same static
     middleware, mounted so both pages can use it.
 - Add a simple in-page anchor nav (no routing library): Why rent / Why mine
-  / Taxes / How it works / Get Bitcoin / FAQ.
+  / Taxes / Who it's for / How it works / Get Bitcoin / FAQ.
 - Match the existing dark theme (use the SPA's CSS variables as inspiration:
   #0b0d12 bg, #141820 surface, #22d3ee accent — but self-contained CSS in the
   landing page; do NOT import the SPA bundle).
@@ -126,6 +126,22 @@ accountant** about your situation, and tax rules for crypto are changing.
 - **Keep records.** Pool statements, payout addresses, and the price of each
   coin on each payout day are what an accountant needs to file correctly.
 
+### Section: Who is this for (#who-its-for)
+
+Four cards, one per barrier (Kevin 2026-08-22 — these are the four real
+reasons people mine this way):
+
+- **Can't afford a miner?** Top ASICs cost thousands. Renting starts at a
+  few dollars for a day of real hashrate.
+- **Electricity too expensive to self-host?** Rented rigs run in the host's
+  facility — the host pays the power bill, not you.
+- **Want to test a strategy before committing?** Rent for an hour or a day,
+  watch real payouts land in your wallet, then decide whether bigger makes
+  sense.
+- **Overwhelmed by miner + pool + wallet setup?** Picking a miner, picking a
+  pool, and connecting the two is the hardest part of mining. RentMyMiner
+  does all three for you.
+
 ### Section: How it works (#how-it-works)
 
 1. **Get some Bitcoin.** The rental marketplace Nexus uses
@@ -196,8 +212,8 @@ accountant** about your situation, and tax rules for crypto are changing.
 
 - Product: Nexus Mining Engine. Virtual cloud-mining accounting layer; no
   native token; 5% connection fee.
-- Links: Why rent / Why mine / Taxes / How it works / Get Bitcoin / FAQ
-  (same-page anchors).
+- Links: Why rent / Why mine / Taxes / Who it's for / How it works / Get
+  Bitcoin / FAQ (same-page anchors).
 - Honest line: "Cryptocurrency mining is risky and may lose money. Nothing
   on this page is financial advice or a promise of returns."
 - Domain placeholder comment for the canonical URL.
