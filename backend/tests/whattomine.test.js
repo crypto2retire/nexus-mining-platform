@@ -12,11 +12,15 @@ jest.mock('../services/backingMonitor', () => ({
 jest.mock('../services/operatorMarketService', () => ({
   configFor: jest.fn(),
 }));
+jest.mock('../services/priceOracle', () => ({
+  getLiveBtcPrice: jest.fn(),
+}));
 
 const axios = require('axios');
 const { pool } = require('../config/db');
 const { getBacking } = require('../services/backingMonitor');
 const { configFor } = require('../services/operatorMarketService');
+const { getLiveBtcPrice } = require('../services/priceOracle');
 const { verifyAnchors, scanProfitable, screenCoins, configured, ALGO_PARAM, __resetCache } = require('../services/whattomineService');
 
 const HOUR = 3600 * 1000;
@@ -25,7 +29,8 @@ describe('whattomineService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     __resetCache();
-    process.env.WTM_API_TOKEN='***';
+    process.env.WTM_API_TOKEN = 'test-token';
+    getLiveBtcPrice.mockResolvedValue({ price: 75000 });
   });
   afterAll(() => {
     delete process.env.WTM_API_TOKEN;
@@ -105,53 +110,73 @@ describe('whattomineService', () => {
   });
 
   describe('scanProfitable', () => {
-    it('applies the liquidity filter and ranks by profit', async () => {
+    it('applies the USD liquidity filter, drops NICEHASH rows, ranks by profit', async () => {
       axios.mockImplementation(async (opts) => {
         if (opts.url.includes('/coins')) {
           return {
             headers: {},
             data: [
-              { tag: 'XMR', name: 'Monero', market_cap: '3000000000', price: '150', price30: '140', exchanges: [{ name: 'Binance', volume: '12000' }] },
-              { tag: 'RTM', name: 'Raptoreum', market_cap: '1000000', price: '0.01', price30: '0.01', exchanges: [{ name: 'CoinEx', volume: '0.04' }] },
+              { tag: 'XMR', name: 'Monero', algo_param_name: 'rmx', market_cap: '3000000000', exchanges: [{ name: 'Binance', volume: '12000' }] },
+              { tag: 'RTM', name: 'Raptoreum', algo_param_name: 'gr', market_cap: '1000000', exchanges: [{ name: 'CoinEx', volume: '0.04' }] },
             ],
           };
         }
         return {
           headers: {},
           data: [
-            { tag: 'XMR', name: 'Monero', algorithm: 'RandomX', estimated_rewards24: '0.09', revenue: '13.5', profit: '4.2' },
-            { tag: 'RTM', name: 'Raptoreum', algorithm: 'GhostRider', estimated_rewards24: '2000', revenue: '150', profit: '145' },
+            { tag: 'NICEHASH', name: 'Nicehash-RandomX', revenue: '1', profit: '0.5' },
+            { tag: 'XMR', name: 'Monero', estimated_rewards24: '0.09', revenue: '13.5', profit: '4.2' },
+            { tag: 'RTM', name: 'Raptoreum', estimated_rewards24: '2000', revenue: '150', profit: '145' },
           ],
         };
       });
       const result = await scanProfitable();
       const xmr = result.rows.find((r) => r.coin === 'XMR');
       const rtm = result.rows.find((r) => r.coin === 'RTM');
-      // RTM profits $145 but is ILLIQUID (0.04 BTC/day) — the mirage filter.
+      // NICEHASH marketplace pseudo-row is filtered out.
+      expect(result.rows.find((r) => r.coin === 'NICEHASH')).toBeUndefined();
+      // RTM profits $145 but is ILLIQUID: 0.04 BTC/day × $75k = $3,000 →
+      // sellable (≥$1k) but NOT liquid (≥$10k) — the mirage filter.
       expect(rtm.liquid).toBe(false);
-      expect(rtm.sellable).toBe(false);
+      expect(rtm.sellable).toBe(true);
+      // XMR: 12000 BTC/day × $75k → liquid.
       expect(xmr.liquid).toBe(true);
       expect(xmr.sellable).toBe(true);
-      // Ranked by profit, but the liquid flag is the decision driver.
+      // Algorithm name is joined from the coins list.
+      expect(xmr.algorithm).toBe('rmx');
+      // Ranked by profit (RTM's $145 ranks first), liquidity is the decision driver.
       expect(result.rows[0].coin).toBe('RTM');
-      expect(result.rows.find((r) => r.coin === 'XMR').top_volume_btc_day).toBe(12000);
+      expect(xmr.top_volume_btc_day).toBe(12000);
     });
   });
 
   describe('screenCoins', () => {
-    it('computes 30d momentum and sorts by volume', async () => {
+    it('derives price from the top-volume exchange and computes difficulty change', async () => {
       axios.mockResolvedValue({
         headers: {},
         data: [
-          { tag: 'ZEC', name: 'Zcash', price: '795', price30: '490', market_cap: '1200000000', exchanges: [{ name: 'Binance', volume: '5000' }], difficulty30: '45' },
-          { tag: 'KAS', name: 'Kaspa', price: '0.0306', price30: '0.025', market_cap: '800000000', exchanges: [{ name: 'MEXC', volume: '9000' }], difficulty30: '12' },
+          {
+            tag: 'ZEC', name: 'Zcash', algo_param_name: 'eq', market_cap: '1200000000',
+            difficulty: '314803866', difficulty30: '216983350', difficulty_change24: '36.28',
+            exchanges: [
+              { name: 'WhiteBIT', volume: '380', price: '0.010', price30: '0.007' },
+              { name: 'Binance', volume: '5000', price: '0.0106', price30: '0.00653' },
+            ],
+          },
+          {
+            tag: 'KAS', name: 'Kaspa', algo_param_name: 'hh', market_cap: '800000000',
+            difficulty: '1000', difficulty30: '900', difficulty_change24: '5',
+            exchanges: [{ name: 'MEXC', volume: '9000', price: '0.0004', price30: '0.00033' }],
+          },
         ],
       });
       const result = await screenCoins();
       const zec = result.rows.find((r) => r.coin === 'ZEC');
-      // 795/490 − 1 = +62.2% 30d momentum
-      expect(zec.change_30d_pct).toBeCloseTo(62.24, 1);
-      expect(zec.difficulty_30d_pct).toBe(45);
+      // Price from the TOP-VOLUME exchange (Binance): 0.0106/0.00653 − 1 = +62.3%
+      expect(zec.change_30d_pct).toBeCloseTo(62.33, 1);
+      // Difficulty change: (314803866/216983350 − 1) × 100 ≈ +45.1%
+      expect(zec.difficulty_30d_pct).toBeCloseTo(45.09, 1);
+      expect(zec.difficulty_change_24h_pct).toBe(36.28);
       expect(result.rows[0].coin).toBe('KAS'); // higher volume first
     });
   });

@@ -79,25 +79,46 @@ async function calculate(settings, { force = false } = {}) {
   return data;
 }
 
-/** Top-exchange liquidity per coin (BTC/day) from /api/v1/coins — the
- * anti-mirage filter (skill: vol < $1k/day = unsellable regardless of
- * profit; ≥ $10k/day to plan on selling). */
+/** Top-exchange liquidity per coin (BTC/day) + best price from /coins —
+ * the anti-mirage filter (skill: vol < $1k/day = unsellable regardless of
+ * profit; ≥ $10k/day to plan on selling — thresholds in USD/day). */
 function liquidityByCoin(coins) {
   const byTag = {};
   for (const coin of coins || []) {
     const exchanges = coin.exchanges || [];
     let best = 0;
     let bestName = '';
+    let bestPrice = null;
+    let bestPrice30 = null;
     for (const ex of exchanges) {
       const vol = Number(ex?.volume || 0);
       if (vol > best) {
         best = vol;
         bestName = String(ex?.name || '');
+        bestPrice = Number(ex?.price);
+        bestPrice30 = Number(ex?.price30);
       }
     }
-    byTag[coin.tag] = { top_volume_btc_day: best, top_exchange: bestName, market_cap: coin.market_cap, price: coin.price, price30: coin.price30 };
+    byTag[coin.tag] = {
+      top_volume_btc_day: best,
+      top_exchange: bestName,
+      market_cap: coin.market_cap,
+      price: Number.isFinite(bestPrice) ? bestPrice : null,
+      price30: Number.isFinite(bestPrice30) ? bestPrice30 : null,
+      difficulty: Number(coin.difficulty),
+      difficulty30: Number(coin.difficulty30),
+      difficulty_change24: Number(coin.difficulty_change24),
+    };
   }
   return byTag;
+}
+
+/** BTC → USD for the liquidity filter (CoinGecko, same source as the market
+ * panel). Cached 60s. */
+async function btcUsdPrice() {
+  const { getLiveBtcPrice } = require('./priceOracle');
+  const quote = await getLiveBtcPrice();
+  return Number(quote?.price) || 0;
 }
 
 function fmtHashrate(hashrate, unit) {
@@ -183,10 +204,12 @@ async function verifyAnchors(userId) {
 const ALGO_UNIT_GHS = { ZCASH: 1e-6, KASPA: 1, LTC_DOGE: 1, BTC: 1e3 };
 
 /** Scan for profitable + liquid mining options using our rentable rig
- * classes (the "look for new coins" use). Applies the liquidity filter. */
+ * classes (the "look for new coins" use). Applies the liquidity filter
+ * (USD/day: liquid ≥ $10k, sellable ≥ $1k) and drops NICEHASH marketplace
+ * pseudo-rows. */
 async function scanProfitable() {
   if (!configured()) throw new Error('WTM_API_TOKEN is not configured');
-  const [coins, calc] = await Promise.all([
+  const [coins, calc, btcUsd] = await Promise.all([
     getCoins(),
     calculate([
       { algorithm: 'hh', power: 50, hashrate: 75e9 }, // KS0 PRO class
@@ -195,27 +218,31 @@ async function scanProfitable() {
       { algorithm: 'sha256', power: 3500, hashrate: 200e12 }, // S21 class
       { algorithm: 'rmx', power: 280, hashrate: 45e3 }, // EPYC class
     ]),
+    btcUsdPrice(),
   ]);
   const liquidity = liquidityByCoin(coins);
+  const algoByName = Object.fromEntries((coins || []).map((c) => [c.tag, c.algo_param_name || c.algorithm]));
   const rows = Array.isArray(calc) ? calc : calc?.coins ? Object.values(calc.coins) : [];
   const ranked = rows
+    .filter((w) => !/^NICEHASH/i.test(String(w.tag || ''))) // marketplace rows are not mineable coins
     .map((w) => {
       const liq = liquidity[w.tag] || {};
+      const volUsd = (liq.top_volume_btc_day || 0) * btcUsd;
       const profitUsd = Number(w.profit || 0);
       const revenueUsd = Number(w.revenue || 0);
       return {
         coin: w.tag,
         name: w.name,
-        algorithm: w.algorithm || null,
+        algorithm: algoByName[w.tag] || null,
         profit_usd_day: profitUsd,
         revenue_usd_day: revenueUsd,
         wtm_est_24h: Number(w.estimated_rewards24 ?? w.estimated_rewards ?? 0),
         top_volume_btc_day: liq.top_volume_btc_day || 0,
         top_exchange: liq.top_exchange || null,
         market_cap: liq.market_cap != null ? Number(liq.market_cap) : null,
-        // Anti-mirage: is the coin actually sellable?
-        liquid: (liq.top_volume_btc_day || 0) >= 10000,
-        sellable: (liq.top_volume_btc_day || 0) >= 1000,
+        // Anti-mirage: is the coin actually sellable? (USD/day thresholds)
+        liquid: volUsd >= 10000,
+        sellable: volUsd >= 1000,
       };
     })
     .filter((w) => Number.isFinite(w.profit_usd_day))
@@ -223,25 +250,31 @@ async function scanProfitable() {
   return { generated_at: new Date().toISOString(), rate_limit: lastRateLimit, rows: ranked.slice(0, 50) };
 }
 
-/** Coin screen: market cap, volume, 30d momentum, difficulty change. */
+/** Coin screen: market cap, volume, 30d momentum, difficulty change.
+ * Prices live per-exchange (top-volume exchange is authoritative); 30d
+ * difficulty change is computed from raw difficulty values. */
 async function screenCoins() {
   if (!configured()) throw new Error('WTM_API_TOKEN is not configured');
   const coins = await getCoins();
+  const liquidity = liquidityByCoin(coins);
   const rows = (coins || [])
     .map((c) => {
-      const liquidity = liquidityByCoin([c]);
       const l = liquidity[c.tag] || {};
-      const price = Number(c.price || 0);
-      const price30 = Number(c.price30 || 0);
+      const price = l.price;
+      const price30 = l.price30;
+      const diff = l.difficulty;
+      const diff30 = l.difficulty30;
       return {
         coin: c.tag,
         name: c.name,
+        algorithm: c.algo_param_name || c.algorithm || null,
         market_cap: l.market_cap != null ? Number(l.market_cap) : null,
-        price: price,
-        change_30d_pct: price > 0 && price30 > 0 ? ((price / price30) - 1) * 100 : null,
+        price: price != null && Number.isFinite(price) ? price : null,
+        change_30d_pct: price != null && price30 != null && price > 0 && price30 > 0 ? ((price / price30) - 1) * 100 : null,
         top_volume_btc_day: l.top_volume_btc_day || 0,
         top_exchange: l.top_exchange || null,
-        difficulty_30d_pct: c.difficulty30 ? Number(c.difficulty30) : null,
+        difficulty_30d_pct: diff != null && diff30 != null && diff30 > 0 ? ((diff / diff30) - 1) * 100 : null,
+        difficulty_change_24h_pct: Number.isFinite(l.difficulty_change24) ? l.difficulty_change24 : null,
         block_reward: Number(c.block_reward || 0),
       };
     })
