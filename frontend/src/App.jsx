@@ -6,6 +6,7 @@ import AdminPanel from './components/AdminPanel';
 import WalletAuth, { AUTH_STORAGE_KEY } from './components/WalletAuth';
 import GamePanel from './components/GamePanel';
 import MarketPanel from './components/MarketPanel';
+import PayoutHistory from './components/PayoutHistory';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 const VALID_WALLET_RE = /^0x[a-f0-9]{40}$/i;
@@ -378,6 +379,8 @@ export default function App() {
                 />
               ))}
             </section>
+
+            {auth && <PayoutHistory payouts={data.payout_history || []} />}
           </>
         )}
 

@@ -14,6 +14,75 @@ function isSafeTreasury() {
   return /^0x[a-f0-9]{40}$/.test(t) && t !== '0x0000000000000000000000000000000000000000';
 }
 
+async function getPayoutHistory(client, userId) {
+  const result = await client.query(
+    `WITH payout_history AS (
+       SELECT 'mining'::text AS kind,
+              CASE WHEN ledger.payout_id IS NULL
+                   THEN ledger.updated_at
+                   ELSE payout.payout_timestamp
+              END AS date,
+              payout.target_pool AS pool,
+              ledger.calculated_reward_1::text AS amount,
+              CASE payout.target_pool
+                WHEN 'ZCASH' THEN 'ZEC'
+                WHEN 'KASPA' THEN 'KAS'
+                WHEN 'LTC_DOGE' THEN 'LTC'
+                WHEN 'XMR' THEN 'XMR'
+                ELSE NULL
+              END AS symbol,
+              ledger.status
+         FROM user_rewards_ledger AS ledger
+         LEFT JOIN real_pool_payouts AS payout USING (payout_id)
+        WHERE ledger.user_id = $1
+          AND ledger.calculated_reward_1 > 0
+
+       UNION ALL
+
+       SELECT 'mining'::text AS kind,
+              CASE WHEN ledger.payout_id IS NULL
+                   THEN ledger.updated_at
+                   ELSE payout.payout_timestamp
+              END AS date,
+              payout.target_pool AS pool,
+              ledger.calculated_reward_2::text AS amount,
+              'DOGE'::text AS symbol,
+              ledger.status
+         FROM user_rewards_ledger AS ledger
+         LEFT JOIN real_pool_payouts AS payout USING (payout_id)
+        WHERE ledger.user_id = $1
+          AND payout.target_pool = 'LTC_DOGE'
+          AND ledger.calculated_reward_2 > 0
+
+       UNION ALL
+
+       SELECT 'game'::text AS kind,
+              game.created_at AS date,
+              NULL::varchar AS pool,
+              game.amount_usdc::text AS amount,
+              'USDC'::text AS symbol,
+              game.reason AS status
+         FROM game_rewards_ledger AS game
+        WHERE game.user_id = $1
+          AND game.reason IN ('STREAK', 'REFERRAL_BONUS')
+     )
+     SELECT kind, date, pool, amount, symbol, status
+       FROM payout_history
+      ORDER BY date DESC
+      LIMIT 20`,
+    [userId]
+  );
+
+  return result.rows.map((row) => ({
+    kind: row.kind,
+    date: row.date instanceof Date ? row.date.toISOString() : new Date(row.date).toISOString(),
+    pool: row.pool,
+    amount: String(row.amount),
+    symbol: row.symbol,
+    status: row.status,
+  }));
+}
+
 async function getDashboard(req, res) {
   try {
     const walletAddress = (req.query.wallet || '').toLowerCase();
@@ -122,6 +191,7 @@ async function getDashboard(req, res) {
          GROUP BY target_pool`,
         [userId]
       );
+      const payoutHistory = await getPayoutHistory(client, userId);
 
       const pendingByPool = {};
       const pendingDogeByPool = {};
@@ -213,6 +283,7 @@ async function getDashboard(req, res) {
         payout_status: payoutStatus,
         pending_rewards: pendingByPool,
         pending_rewards_2: pendingDogeByPool,
+        payout_history: payoutHistory,
         multi_coin: { coins_owned: coinsOwned, discount_pct: discountPctFor(coinsOwned) },
         // Real backing per coin (cached 60s) — what ACTUALLY mines this room.
         backing,
@@ -229,4 +300,4 @@ async function getDashboard(req, res) {
   }
 }
 
-module.exports = { getDashboard };
+module.exports = { getDashboard, getPayoutHistory };
