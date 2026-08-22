@@ -16,7 +16,10 @@ stories, no fabricated numbers, no superlatives ("best"/"only").** Only the
 reasons below — they are the real reasons from the product history.
 
 **Positioning (Kevin 2026-08-22, non-negotiable):** [BRAND] is NOT a
-"rent my miner" service — nobody is renting a miner from us. Two services:
+"rent my miner" service — nobody is renting a miner from us. [BRAND] is a
+**matchmaker and technical facilitator**, NOT a cloud mining platform. We
+never mine for the user, never control the hardware, never choose the pool
+for them, and never hold their coins. Two services:
 
 1. **Renter-first data.** [BRAND] shows realistic returns for people who
    want to RENT mining capacity. Everyone else (WhatToMine-style
@@ -25,8 +28,18 @@ reasons below — they are the real reasons from the product history.
    costs, what it realistically returns, and whether it beats buying the
    coin — before anyone spends a dollar.
 2. **Easy self-custody connect.** Pick a coin, pick a pool (by returns,
-   size, or rental length), and [BRAND] rents the rig and points it at your
-   wallet. The pool pays you directly.
+   size, or rental length), and [BRAND] rents the rig on MiningRigRentals
+   and points it at the user's wallet. The pool pays the user directly.
+
+**Why this model matters (the trust story):** centralized cloud mining apps
+(ECOS, KuMining, Wattum — the traditional model) take your money, control
+the hardware AND the pool AND the wallet, and pay you from their own
+account. That centralization is why cloud mining has a scam reputation.
+[BRAND] is the opposite: the user chooses the coin and pool, the rental is a
+real rig on a real marketplace, and the pool sends rewards straight to the
+user's wallet. Self-custody, pool-choice, and no middleman holding coins —
+this is closer to self-hosted mining software (like MiningOS) than to cloud
+mining, with the rental facilitation added.
 
 Every copy reference to the product below uses [BRAND] — replace with the
 final name when chosen.
@@ -247,9 +260,13 @@ Two services, one page: **see the real numbers** (rental data), then
 5. **What is the 5% fee?** A flat connection fee for finding the miner,
    setting up the rental, and pointing it at a correctly configured pool.
    The mined coins themselves go to you in full.
-6. **Is this cloud mining?** Not in the traditional sense. You are renting
-   real hashrate on a real marketplace for a fixed window — not buying a
-   share of a miner you do not control and being promised a return.
+6. **Is this cloud mining?** No — it is the opposite. Traditional cloud
+   mining apps (ECOS, KuMining, Wattum) are centralized: you pay them, they
+   control the hardware, the pool, and the wallet, and they pay you from
+   their own account. [BRAND] does none of that: you choose the coin and
+   the pool, the rental is a real rig on MiningRigRentals, and the pool
+   sends your rewards directly to your wallet. [BRAND] never holds your
+   coins and never controls the mining.
 7. **Do you promise returns?** No. We show the current market math on every
    rig. Mining can cost more than buying, and we want you to see that before
    you spend anything.
